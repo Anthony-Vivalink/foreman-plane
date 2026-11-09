@@ -11,10 +11,10 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from foreman.config import load_config  # noqa: E402
-from foreman.errors import UnknownTaskError  # noqa: E402
-from foreman.ledger import Ledger  # noqa: E402
-from foreman.runner import Dispatcher, RunResult  # noqa: E402
+from foreman_plane.config import load_config  # noqa: E402
+from foreman_plane.errors import UnknownTaskError  # noqa: E402
+from foreman_plane.ledger import Ledger  # noqa: E402
+from foreman_plane.runner import Dispatcher, RunResult  # noqa: E402
 
 
 class StubRunner:

@@ -2,7 +2,7 @@
 
 # 工头 foreman-plane
 
-### 让任务治理跑在 agent 外面
+### 跑在 agent 外面的一层任务治理 —— 个人工具级
 
 [![PyPI 版本](https://img.shields.io/pypi/v/foreman-plane?style=flat-square&color=5B4CF0)](https://pypi.org/project/foreman-plane/)
 [![下载量](https://badgen.net/pypi/dm/foreman-plane?label=downloads&color=4E9BF1)](https://pypi.org/project/foreman-plane/)
@@ -22,6 +22,9 @@ Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正�
 
 > **agent 忘了的承诺不算承诺。** 通过与否只认磁盘上的产物，所以判据活得比产出它的
 > 那段会话更久。
+
+它的尺寸是按**「一个人 + 一台机器 + 一个状态目录」**设计的——个人工具级，不是企业级
+平台。详见[适用范围](#适用范围)。
 
 ![执行体通过 MCP/stdio 与工头对话](https://raw.githubusercontent.com/Anthony-Vivalink/foreman-plane/main/docs/images/architecture.zh.png)
 
@@ -54,6 +57,46 @@ Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正�
 | **执行体可插拔** | 工头不选模型，也不关心哪条命令跑这张单；换条命令，治理逻辑照旧。 |
 | **依赖解析失败即致命** | 依赖标记解析不出来就拒绝派单，绝不静默丢掉。 |
 
+## 适用范围
+
+**个人工具级，不是企业级平台。** 工头是刻意做小的。它按**「一个人、一台机器、
+一个状态目录」**设计——不是给团队、不是给机队、不是给受监管的组织用的。把这一点写在
+明面上是设计的一部分：一个假装自己是平台的工具，收回来的配置成本大于省下的事。
+
+**它是什么**
+
+- 一个普通进程：要用的时候起，用完就停。
+- 一个状态目录（`FOREMAN_HOME`）加一条只追加的 JSONL 台账。
+- 几个可互换的命令行 agent、几个仓库、一张任务图。
+- 状态用 `cat`、`jq` 就能读——不需要服务账号，也没有私有存储格式。
+
+**它不是什么，也不会往那个方向长**
+
+| 不是这个 | 为什么，以及你该用啥 |
+| --- | --- |
+| 多租户平台 | 没有租户、没有 RBAC、没有 SSO、没有审计导出。一个 `FOREMAN_HOME` 只属于一个人。 |
+| 持久化工作流引擎 | 没有守护进程、没有消息队列、没有定时器、没有高可用、扛不住大规模重试。要跨天续跑的正式工作流请用 Temporal / Airflow / Argo Workflows。 |
+| 数据库 | 台账就是一个 JSONL 文件——在「一个人的任务量」这个尺度上又快又好审，但它不是带查询计划器的分片存储。 |
+| 企业级审计产品 | 没有留存策略引擎、没有签名的报告、没有合规控件。 |
+| 放业务逻辑的地方 | 工头什么都不决定。干活是 agent 的活儿，工头管的是次序、闸门和判据。 |
+| 带界面的控制台 | 全部入口就是 CLI、MCP stdio 和 Python API。没有界面、没有 web 服务。 |
+
+**为什么这算优点**
+
+整个工具就一个目录，毫秒级启动，可以用文本编辑器从头读到尾。如果你的需求是「我们四十人
+的组织要带 SLA 计时的审批流、要 Postgres 支撑的审计日志」，那这是错的工具，别在这儿浪费一
+个下午；如果需求是「我的 agent 老忘上周答应过什么，我想要一本账能记下来」，那它刚好是那个
+尺寸。
+
+**边界在哪，什么该换谁**
+
+| 你要的是 | 用 |
+| --- | --- |
+| 跨天持久、高可用、几千个并发任务 | Temporal / Airflow / Argo Workflows |
+| 团队级审批流与审计产品 | Jira / ServiceNow / 有正经管理模型的流程平台 |
+| 人工任务跟踪与报表 | Beads，或者就一个普通的 issue tracker |
+| 单机、依赖感知、不带模型的、自己 agent 的任务台账 | **工头 foreman-plane** |
+
 ## 装上之后是什么体验
 
 > 你：`这批报告先跑完，跑完再让下游合并`
@@ -66,6 +109,17 @@ Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正�
 ```bash
 pip install foreman-plane
 ```
+
+装出来是两个等价的命令，随你挑：
+
+```bash
+foreman-plane --help   # 正名
+gongtou --help          # 短别名（工头）
+```
+
+**故意不提供 `foreman` 这个命令**：这个名字已经被别的项目占了（npm 上一个 AI 编排引擎、
+GitHub 上一个基础设施管理平台），两个包抢同一个可执行文件名，在 `PATH` 上是真冲突。
+Python 包名用的是 `foreman_plane`，所以也不会跟 PyPI 上那个不相干的 `foreman` 库撞。
 
 或者从源码目录直接跑：
 
@@ -93,17 +147,20 @@ foreman-plane 是个普通进程，不是服务：没有守护进程、没有端
 
 ```bash
 pip install foreman-plane
-foreman --help
-foreman config
+foreman-plane --help
+foreman-plane config
 ```
 
-`foreman config` 会打印当前生效的主目录、台账路径、运行日志目录和已知的执行体。这一步还不写任何文件。
+`foreman-plane` 和 `gongtou` 是同一个程序。模块入口分别是
+`python -m foreman_plane.cli` 和 `python -m foreman_plane.mcp_server`。
+
+`foreman-plane config` 会打印当前生效的主目录、台账路径、运行日志目录和已知的执行体。这一步还不写任何文件。
 
 ### 第 1 步 —— 给工头一个家
 
 ```bash
 export FOREMAN_HOME=/var/lib/foreman
-foreman config
+foreman-plane config
 ```
 
 工头自己的东西全在 `FOREMAN_HOME` 底下：
@@ -149,7 +206,7 @@ cat > /tmp/card.md <<'MD'
 读一下笔记写个总结，最后加一节 "Conclusion"。
 MD
 
-foreman dispatch --file /tmp/card.md --agent dsh --workdir /srv/work
+foreman-plane dispatch --file /tmp/card.md --agent dsh --workdir /srv/work
 ```
 
 命令会把这张卡跑到结束，然后给出裁决：
@@ -178,7 +235,7 @@ mcp:
       command: python3
       args:
         - -m
-        - foreman.mcp_server
+        - foreman_plane.mcp_server
       env:
         FOREMAN_HOME: /var/lib/foreman
 ```
@@ -190,7 +247,7 @@ mcp:
   "mcpServers": {
     "foreman": {
       "command": "python3",
-      "args": ["-m", "foreman.mcp_server"],
+      "args": ["-m", "foreman_plane.mcp_server"],
       "env": { "FOREMAN_HOME": "/var/lib/foreman" }
     }
   }
@@ -225,6 +282,8 @@ mcp:
 * 不替你重试被拦下的卡。
 * 不信模型对结果的自述——只信文件。
 
+什么情况下它就不该是你要找的东西，见[适用范围](#适用范围)。
+
 ### 出问题怎么查
 
 | 现象 | 什么意思 | 怎么办 |
@@ -234,7 +293,7 @@ mcp:
 | 退出码 2，`dependency_unknown` | 上游那个 id 从没被派过 | 检查 id 拼写 |
 | 退出码 2，`dependency_unparsed` | `[depends_on]` 标记解析不了 | 改卡——工头拒绝猜 |
 | 退出码 2，`dependency_cycle` | 依赖图成环 | 断环 |
-| 退出码 2，`duplicate_task` | 这个 id 已经有 `dispatch` 事件了 | 换 id、加 `--force`，或 `foreman ledger replan` |
+| 退出码 2，`duplicate_task` | 这个 id 已经有 `dispatch` 事件了 | 换 id、加 `--force`，或 `foreman-plane ledger replan` |
 | 退出码 2，`task_id_missing` | 卡里没有 `[id]` | 补上 |
 | 退出码 3 | 产物缺失、太小或缺标记 | 看 `runs/` 里那次运行的日志 |
 | `exit_code: 127`，`no such agent, or its command template is empty` | `agents.json` 里没这个 agent | 加上这个 agent，或用内置的 |
@@ -336,15 +395,18 @@ CLI 的退出码和执行体的退出码是两回事：`退出码 2`、`退出�
 | `foreman_status` | 查某个任务或全局的台账状态 |
 | `foreman_cancel` | 取消任务，不存在的任务号会被拒绝 |
 
+工具名保留 `foreman_` 前缀：它是 MCP 内部的命名空间，不是可执行文件名，所以命令行改名
+不影响它们。
+
 ## 命令行
 
 ```
-foreman dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
-foreman status   [--task-id ID] [--json]
-foreman ledger   list | show | ready | blocked | cancel | replan
-foreman verify   --acceptance "<验收串>"
-foreman mcp
-foreman config
+foreman-plane dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
+foreman-plane status   [--task-id ID] [--json]
+foreman-plane ledger   list | show | ready | blocked | cancel | replan
+foreman-plane verify   --acceptance "<验收串>"
+foreman-plane mcp
+foreman-plane config
 ```
 
 退出码：`0` 成功 · `2` 被闸门拦下 · `3` 产物验收不通过 · `1` 其它错误。

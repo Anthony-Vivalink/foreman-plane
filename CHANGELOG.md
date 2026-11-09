@@ -4,6 +4,36 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.0
+
+### Changed
+
+- **The console command is now `foreman-plane`, with `gongtou` as a short
+  alias.**  The `foreman` command is gone.  That name is taken by other
+  projects — an AI orchestration engine on npm, an infrastructure manager on
+  GitHub — and two packages shipping the same binary name is a real conflict
+  on `PATH`.
+- **The Python package is now `foreman_plane`** (was `foreman`).  PyPI's
+  `foreman` library installs a top-level `foreman` module, so installing both
+  would have overwritten files.  The new spellings are `import foreman_plane`,
+  `python -m foreman_plane.cli` and `python -m foreman_plane.mcp_server`.
+- **Both READMEs now state the scope up front: a personal tool, not an
+  enterprise platform.**  What it is (one person, one machine, one state
+  directory, plain files), what it is not and will not grow into (no
+  multi-tenancy, no RBAC, no SSO, no workflow engine, no database, no UI),
+  why that is a feature, and what to reach for instead when you need
+  team-scale workflow, approval or audit tooling.
+- The tagline and the PyPI summary now say "personal toolchain" and
+  "personal-tool grade".
+
+### Unchanged on purpose
+
+- **The MCP tool names stay `foreman_dispatch`, `foreman_status` and
+  `foreman_cancel`.**  They are a namespace inside MCP, not a binary name, so
+  the rename does not break existing clients.
+- **`FOREMAN_HOME` and its default `$HOME/.foreman` are unchanged**, so
+  existing ledgers keep working.
+
 ## 0.1.2
 
 ### Added

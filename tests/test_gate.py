@@ -10,9 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from foreman.contract import parse_task_card  # noqa: E402
-from foreman.gate import evaluate_gate  # noqa: E402
-from foreman.ledger import Ledger  # noqa: E402
+from foreman_plane.contract import parse_task_card  # noqa: E402
+from foreman_plane.gate import evaluate_gate  # noqa: E402
+from foreman_plane.ledger import Ledger  # noqa: E402
 
 
 class GateTests(unittest.TestCase):

@@ -80,21 +80,25 @@ cd /root/Documents/deepseek-harness/default-workspace/foreman-plane
 python3 -m unittest discover -s tests -v
 ```
 
-结果：**Ran 69 tests — OK**（退出码 0，无 error / failure / skip）。
+结果：**Ran 78 tests — OK**（退出码 0，无 error / failure / skip）。
 
 ```
 test_acceptance ......... 10 ok
-test_cli ................  8 ok
-test_contract ........... 12 ok
+test_cli ................ 11 ok
+test_contract ........... 14 ok
 test_gate ............... 12 ok
-test_ledger ............. 11 ok
+test_ledger ............. 13 ok
 test_mcp_server .........  8 ok
-test_runner ..............  8 ok
+test_runner .............. 10 ok
 ------------------------------------------------------
-Ran 69 tests in 2.05s
+Ran 78 tests in 2.28s
 
 OK
 ```
+
+> v0.2.0 更新：包名从 `foreman` 改为 `foreman_plane`，命令行从 `foreman` 改为
+> `foreman-plane`（别名 `gongtou`），新增 2 例（usage 名字随实际调用的命令名变化），
+> 其余用例原样保留、全部重跑通过。
 
 覆盖要点（规格 §10 逐条对应）：
 
@@ -114,8 +118,8 @@ OK
 | 六个 BLOCK 原因各一例 + 全 pass 放行 + 软依赖缺失只置 pending | `test_gate` 12 例 |
 | min_bytes / sha256 / contains / exit_code / 文件缺失 | `test_acceptance` 10 例 |
 | 假适配器：exit_code 透传、stdout 捕获、命令不存在→127、超时→124 | `test_runner` 8 例（用临时脚本，不依赖 claude/codex/dsh 是否安装） |
-| MCP 子进程：initialize / tools/list / tools/call；**depends_on 指向不存在任务 → blocked 且台账只有 blocked 没有 dispatch** | `test_mcp_server` 8 例（真起 `python -m foreman.mcp_server`，NDJSON 喂帧，断言台账事件序列恰好 `["blocked"]`） |
-| `foreman status --json` 可解析；dispatch 阻塞退出码 2 | `test_cli` 8 例 |
+| MCP 子进程：initialize / tools/list / tools/call；**depends_on 指向不存在任务 → blocked 且台账只有 blocked 没有 dispatch** | `test_mcp_server` 8 例（真起 `python -m foreman_plane.mcp_server`，NDJSON 喂帧，断言台账事件序列恰好 `["blocked"]`） |
+| `foreman-plane status --json` 可解析；dispatch 阻塞退出码 2 | `test_cli` 8 例 |
 
 补充的端到端冒烟（人工执行，非单测）：真起 MCP 子进程 →
 `initialize` 返回 `serverInfo={"name":"foreman","version":"0.1.0"}`；

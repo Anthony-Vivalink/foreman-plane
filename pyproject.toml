@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "foreman-plane"
-version = "0.1.2"
-description = "A task governance plane that runs outside the agent harness: dispatch, dependency gates, objective acceptance, append-only ledger."
+version = "0.2.0"
+description = "A task governance plane for a personal toolchain: dispatch, dependency gates, objective acceptance, an append-only ledger — outside your agent harness, zero dependencies, one process, one file."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Foreman Plane contributors" }]
-keywords = ["agents", "mcp", "orchestration", "task-governance", "audit"]
+keywords = ["agents", "mcp", "orchestration", "task-governance", "audit", "personal-tools", "lightweight", "solo-dev"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -23,7 +23,12 @@ classifiers = [
 dependencies = []
 
 [project.scripts]
-foreman = "foreman.cli:main"
+# The `foreman` command is deliberately NOT provided: the name is taken by
+# other projects (an AI orchestration engine on npm, an infrastructure
+# manager on GitHub) and a shared binary name is a real conflict on PATH.
+# `gongtou` — 工头 — is the short alias for people who prefer it.
+foreman-plane = "foreman_plane.cli:main"
+gongtou = "foreman_plane.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Anthony-Vivalink/foreman-plane"

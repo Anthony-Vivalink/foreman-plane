@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from foreman.contract import is_valid_task_id, parse_task_card  # noqa: E402
+from foreman_plane.contract import is_valid_task_id, parse_task_card  # noqa: E402
 
 FULL_CARD = """【id】T-20261109-20
 【depends_on】T-20261109-01

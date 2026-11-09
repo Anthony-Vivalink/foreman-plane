@@ -18,7 +18,7 @@ SRC = ROOT / "src"
 
 sys.path.insert(0, str(SRC))
 
-from foreman.mcp_server import PROTOCOL_VERSION  # noqa: E402
+from foreman_plane.mcp_server import PROTOCOL_VERSION  # noqa: E402
 
 
 class McpServerTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class McpServerTests(unittest.TestCase):
         env["PYTHONPATH"] = str(SRC) + (os.pathsep + existing if existing else "")
         env["FOREMAN_HOME"] = str(self.home)
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "foreman.mcp_server"],
+            [sys.executable, "-m", "foreman_plane.mcp_server"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

@@ -225,7 +225,7 @@ class ForemanMCPServer:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for ``python -m foreman.mcp_server``."""
+    """Entry point for ``python -m foreman_plane.mcp_server``."""
     server = ForemanMCPServer()
     return server.serve_forever()
 

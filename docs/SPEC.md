@@ -30,7 +30,7 @@ foreman-plane/
 │   └── task_card.md          # 完整任务卡示例（含四个标记 + 验收判据）
 ├── scripts/
 │   └── publish.sh            # 构建 + 校验（不内含任何 token；凭据走环境变量）
-├── src/foreman/
+├── src/foreman_plane/
 │   ├── __init__.py           # __version__ = "0.1.0"
 │   ├── config.py             # FOREMAN_HOME 解析、agents.json 载入、默认值
 │   ├── contract.py           # 任务卡契约解析（四个标记 + 严格清洗 + unparsed 检测）
@@ -39,7 +39,7 @@ foreman-plane/
 │   ├── acceptance.py         # 产物验收判据
 │   ├── runner.py             # 执行体适配器（claude/codex/dsh/generic + 自定义）
 │   ├── mcp_server.py         # MCP over stdio（JSON-RPC 2.0，NDJSON 帧）
-│   ├── cli.py                # foreman 命令行
+│   ├── cli.py                # foreman-plane / gongtou 命令行
 │   └── errors.py             # 异常类型
 └── tests/
     ├── test_contract.py
@@ -259,13 +259,13 @@ class RunResult:
 
 ## 8. CLI（cli.py）
 
-命令（`python -m foreman.cli` 或控制台脚本 `foreman`）：
-- `foreman dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]`
-- `foreman status [--task-id ID] [--json]`
-- `foreman ledger list|show|ready|blocked|cancel|replan`（子命令形式）
-- `foreman verify --acceptance "<验收串>"`
-- `foreman mcp`（启动 MCP stdio 服务）
-- `foreman config`（打印当前生效配置：FOREMAN_HOME、ledger 路径、可用 agent 名）
+命令（`python -m foreman_plane.cli` 或控制台脚本 `foreman-plane`（别名 `gongtou`））：
+- `foreman-plane dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]`
+- `foreman-plane status [--task-id ID] [--json]`
+- `foreman-plane ledger list|show|ready|blocked|cancel|replan`（子命令形式）
+- `foreman-plane verify --acceptance "<验收串>"`
+- `foreman-plane mcp`（启动 MCP stdio 服务）
+- `foreman-plane config`（打印当前生效配置：FOREMAN_HOME、ledger 路径、可用 agent 名）
 
 所有命令支持 `--json`。退出码：0 成功 / 2 闸门阻塞 / 3 验收失败 / 1 其它错误。
 
@@ -294,8 +294,8 @@ class ForemanConfig:
 | test_gate.py | dependency_unknown / dependency_pending / dependency_failed / dependency_unaccepted / dependency_unparsed / dependency_cycle 六个 BLOCK 原因各一例；全部 pass 才放行；软依赖缺失 → allowed=True 且 needs_api_pending=True |
 | test_acceptance.py | 存在且非空→ok；min_bytes；sha256；contains；exit_code；文件缺失→ok=False |
 | test_runner.py | 用**假的适配器**（写一个临时脚本）验证：exit_code 透传、stdout 捕获、命令不存在→127、超时→124 |
-| test_mcp_server.py | 起一个 MCP server 子进程（`sys.executable -m foreman.mcp_server`），用 NDJSON 喂 initialize/tools/list/tools/call；**关键用例**：dispatch 一个 depends_on 不存在的任务 → 返回 blocked、isError 或 ok=false、且台账里只有 `blocked` 没有 `dispatch` |
-| test_cli.py | `foreman status --json` 可解析；`dispatch` 阻塞时退出码为 2 |
+| test_mcp_server.py | 起一个 MCP server 子进程（`sys.executable -m foreman_plane.mcp_server`），用 NDJSON 喂 initialize/tools/list/tools/call；**关键用例**：dispatch 一个 depends_on 不存在的任务 → 返回 blocked、isError 或 ok=false、且台账里只有 `blocked` 没有 `dispatch` |
+| test_cli.py | `foreman-plane status --json` 可解析；`dispatch` 阻塞时退出码为 2 |
 
 - 测试用 `tempfile.TemporaryDirectory()` 作 FOREMAN_HOME，**不得污染真实 HOME**。
 - 测试不得依赖网络、不得依赖 claude/codex/dsh 是否安装。
@@ -308,15 +308,15 @@ class ForemanConfig:
   - 与其它方案的差异（**不要点名任何现有项目**，用能力差异描述）
   - 中文版不是机翻，允许重写但信息必须等价
 - `docs/PROTOCOL.md`：任务卡契约、事件模型、MCP 工具签名、验收判据语法
-- `pyproject.toml`：`name="foreman-plane"`, `version="0.1.0"`, `license="MIT"`, `requires-python=">=3.10"`, `dependencies=[]`,
-  `[project.scripts] foreman = "foreman.cli:main"`, `[tool.setuptools] package-dir = {"" = "src"}`
+- `pyproject.toml`：`name="foreman-plane"`, `version="0.2.0"`, `license="MIT"`, `requires-python=">=3.10"`, `dependencies=[]`,
+  `[project.scripts] foreman-plane = "foreman_plane.cli:main"`（别名 `gongtou`）, `[tool.setuptools] package-dir = {"" = "src"}`
 - `scripts/publish.sh`：`set -euo pipefail`；构建 wheel/sdist（`python -m build` 若不可用则退化为 `pip wheel`）；**必须先跑测试再构建**；上传用 `TWINE_USERNAME/TWINE_PASSWORD` 环境变量，脚本里不得出现任何凭据字面量。
 - `CHANGELOG.md`：`## 0.1.0` 首次发布条目。
 - `.github/workflows/ci.yml`：矩阵 3.10/3.11/3.12，`python -m unittest discover -s tests -v`。
 
 ## 12. 交付要求
 
-1. 全部代码写在仓库根目录 `foreman-plane/` 下（包源码在 `src/foreman/`）。
+1. 全部代码写在仓库根目录 `foreman-plane/` 下（包源码在 `src/foreman_plane/`）。
 2. **测试必须真的跑通**：`cd foreman-plane && python3 -m unittest discover -s tests -v` 全绿，把输出贴进 `docs/IMPLEMENTATION_REPORT.md`。
 3. `docs/IMPLEMENTATION_REPORT.md` 写：文件清单、测试输出摘要、已知限制、v2 计划（cron/环境反写、过夜不炸、Web UI）。
 4. **不要** git init / git commit / 任何 push / 任何上传（凭据没有，且由主脑统一做）。

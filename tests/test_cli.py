@@ -48,13 +48,36 @@ class CliTests(unittest.TestCase):
 
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "foreman.cli", *args],
+            [sys.executable, "-m", "foreman_plane.cli", *args],
             capture_output=True,
             text=True,
             env=self._env(),
             cwd=str(ROOT),
             timeout=60,
         )
+
+    # ------------------------------------------------------------------
+    def test_help_reports_the_canonical_name_for_module_runs(self) -> None:
+        done = self._run("--help")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("usage: foreman-plane", done.stdout)
+
+    def test_help_reports_the_alias_name_that_was_typed(self) -> None:
+        sys.path.insert(0, str(SRC))
+        try:
+            from foreman_plane import cli
+        finally:
+            sys.path.remove(str(SRC))
+        original = sys.argv
+        try:
+            sys.argv = ["gongtou", "--help"]
+            self.assertEqual(cli._prog_name(), "gongtou")
+            sys.argv = ["foreman-plane", "--help"]
+            self.assertEqual(cli._prog_name(), "foreman-plane")
+            sys.argv = ["cli.py", "--help"]
+            self.assertEqual(cli._prog_name(), "foreman-plane")
+        finally:
+            sys.argv = original
 
     # ------------------------------------------------------------------
     def test_status_json_is_parseable(self) -> None:

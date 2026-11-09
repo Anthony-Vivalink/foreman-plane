@@ -1,6 +1,6 @@
 """Command line interface (SPEC §8).
 
-``python -m foreman.cli`` or the ``foreman`` console script.
+``python -m foreman_plane.cli`` or the ``foreman-plane`` console script.
 
 Exit codes: 0 success, 2 blocked by the gate, 3 artefact acceptance failed,
 1 any other error.
@@ -38,11 +38,25 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _prog_name() -> str:
+    """The name the user actually typed.
+
+    ``foreman-plane`` is the canonical command and ``gongtou`` is the short
+    alias; both should report their own name in ``--help``.  Module runs
+    (``python -m foreman_plane.cli``) fall back to the canonical name instead
+    of leaking ``cli.py`` into the usage line.
+    """
+    name = Path(sys.argv[0]).name if sys.argv and sys.argv[0] else ""
+    if name in ("", "cli.py", "__main__.py", "-c"):
+        return "foreman-plane"
+    return name
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
-        prog="foreman",
-        description="foreman-plane — task governance outside the agent harness",
+        prog=_prog_name(),
+        description="foreman-plane — task governance outside your agent harness (personal-tool grade)",
     )
     _add_json(parser)
     sub = parser.add_subparsers(dest="command")
@@ -172,7 +186,7 @@ def _cmd_status(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
 def _cmd_ledger(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
     command = getattr(args, "ledger_command", None)
     if command is None:
-        print("foreman ledger: expected one of list|show|ready|blocked|cancel|replan", file=sys.stderr)
+        print("foreman-plane ledger: expected one of list|show|ready|blocked|cancel|replan", file=sys.stderr)
         return EXIT_ERROR
     if command == "list":
         payload = dispatcher.status(getattr(args, "task_id", None))

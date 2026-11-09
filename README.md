@@ -2,7 +2,7 @@
 
 # foreman-plane
 
-### The task governance plane that runs outside your agent harness
+### Task governance outside your agent harness — personal-tool grade
 
 [![PyPI version](https://img.shields.io/pypi/v/foreman-plane?style=flat-square&color=5B4CF0)](https://pypi.org/project/foreman-plane/)
 [![downloads](https://badgen.net/pypi/dm/foreman-plane?label=downloads&color=4E9BF1)](https://pypi.org/project/foreman-plane/)
@@ -23,6 +23,10 @@ dispatch, dependency gating, objective acceptance and an append-only ledger.
 
 > A promise the agent forgot is not a promise. The verdict is derived from files
 > on disk, so it outlives the session that produced it.
+
+It is sized for **one person, one machine, one state directory** — a personal
+tool, not an enterprise platform. See
+[Scope](#scope).
 
 ![Execution bodies talk to foreman-plane over MCP/stdio](https://raw.githubusercontent.com/Anthony-Vivalink/foreman-plane/main/docs/images/architecture.en.png)
 
@@ -55,6 +59,50 @@ Zero third-party dependencies. Python ≥ 3.10, standard library only.
 | **Pluggable execution bodies** | The plane picks no model and does not care which command runs a card. Swap the command, keep the governance. |
 | **Unparsed dependencies are fatal** | A dependency marker that cannot be parsed refuses the dispatch. It is never silently dropped. |
 
+## Scope
+
+**A personal tool, not an enterprise platform.** foreman-plane is deliberately
+small. It is designed for **one person, one machine, one state directory** — not
+for a team, a fleet or a regulated org. Saying this out loud is part of the
+design: a tool that pretends to be a platform costs you more in configuration
+than it saves.
+
+**What it is**
+
+- A plain process. Start it when you need it, stop it when you are done.
+- One directory of state (`FOREMAN_HOME`) and one append-only JSONL ledger.
+- A handful of interchangeable CLI agents, a few repositories, one task graph.
+- State you can read with `cat` and `jq` — no service account, no proprietary store.
+
+**What it is not, and is not going to grow into**
+
+| Not this | Why — and what to use instead |
+| --- | --- |
+| A multi-tenant platform | No tenancy, no RBAC, no SSO, no audit export. One `FOREMAN_HOME` belongs to one person. |
+| A durable workflow engine | No daemon, no queue broker, no timers, no HA, no retries at scale. For resumable long-running workflows use Temporal, Airflow or Argo Workflows. |
+| A database | The ledger is a JSONL file — fast and auditable at the scale of one person's tasks, not a sharded store with a query planner. |
+| An enterprise audit product | No retention policy engine, no signed reports, no compliance controls. |
+| A place for business logic | The plane decides nothing. Your agent owns the work; the plane owns the sequence, the gate and the verdict. |
+| A dashboard | The whole surface is CLI, MCP stdio and a Python API. There is no UI and no web server. |
+
+**Why this is a feature**
+
+The tool fits in one directory, starts in milliseconds, and can be read end to
+end with a text editor. If your requirement is "our forty-person org needs
+approval workflows with SLA clocks and a Postgres-backed audit trail", this is
+the wrong tool and you should not spend an afternoon on it. If it is "my agents
+keep forgetting what they promised last week and I want a ledger that says so",
+it is exactly the right size.
+
+**Where it stops and something else starts**
+
+| If you need | Use |
+| --- | --- |
+| Durability across days, HA, thousands of concurrent tasks | Temporal / Airflow / Argo Workflows |
+| A team-wide approval and audit product | Jira / ServiceNow / a workflow platform with a real admin model |
+| Human task tracking and reporting | Beads, or a plain issue tracker |
+| A single-machine, dependency-aware, model-free task ledger for your own agents | **foreman-plane** |
+
 ## What it feels like
 
 > You: `Finish these reports first, then let the downstream job merge them.`
@@ -69,6 +117,19 @@ Zero third-party dependencies. Python ≥ 3.10, standard library only.
 ```bash
 pip install foreman-plane
 ```
+
+You get two identical commands — use whichever you like:
+
+```bash
+foreman-plane --help   # canonical
+gongtou --help          # short alias (工头)
+```
+
+There is deliberately **no `foreman` command**. That name is already taken by
+other projects — an AI orchestration engine on npm, an infrastructure manager
+on GitHub — and two packages shipping the same binary name is a real conflict
+on `PATH`. The Python package is `foreman_plane`, so it does not collide with
+the unrelated `foreman` library on PyPI either.
 
 Or run it straight from a checkout:
 
@@ -100,18 +161,21 @@ deployment guide:
 
 ```bash
 pip install foreman-plane
-foreman --help
-foreman config
+foreman-plane --help
+foreman-plane config
 ```
 
-`foreman config` prints the effective home, the ledger path, the run directory
+`foreman-plane` and `gongtou` are the same program. The module entry points are
+`python -m foreman_plane.cli` and `python -m foreman_plane.mcp_server`.
+
+`foreman-plane config` prints the effective home, the ledger path, the run directory
 and the known execution bodies. Nothing is written yet.
 
 ### Step 1 — give the plane a home
 
 ```bash
 export FOREMAN_HOME=/var/lib/foreman
-foreman config
+foreman-plane config
 ```
 
 Everything the plane owns lives under `FOREMAN_HOME`:
@@ -168,7 +232,7 @@ cat > /tmp/card.md <<'MD'
 Read the notes and write a summary. End it with a "Conclusion" section.
 MD
 
-foreman dispatch --file /tmp/card.md --agent dsh --workdir /srv/work
+foreman-plane dispatch --file /tmp/card.md --agent dsh --workdir /srv/work
 ```
 
 The command runs the card to completion and then reports the verdict:
@@ -200,7 +264,7 @@ mcp:
       command: python3
       args:
         - -m
-        - foreman.mcp_server
+        - foreman_plane.mcp_server
       env:
         FOREMAN_HOME: /var/lib/foreman
 ```
@@ -212,7 +276,7 @@ mcp:
   "mcpServers": {
     "foreman": {
       "command": "python3",
-      "args": ["-m", "foreman.mcp_server"],
+      "args": ["-m", "foreman_plane.mcp_server"],
       "env": { "FOREMAN_HOME": "/var/lib/foreman" }
     }
   }
@@ -253,6 +317,9 @@ graph would deadlock and the upstream could never unblock it.
 * It does not retry a blocked card for you.
 * It does not believe the model about the outcome — only files.
 
+For where this stops being the right tool, see
+[Scope](#scope).
+
 ### Troubleshooting
 
 | Symptom | What it means | Fix |
@@ -262,7 +329,7 @@ graph would deadlock and the upstream could never unblock it.
 | exit 2, `dependency_unknown` | that upstream id was never dispatched | check the id |
 | exit 2, `dependency_unparsed` | the `[depends_on]` marker could not be parsed | fix the card — the plane refuses to guess |
 | exit 2, `dependency_cycle` | the dependency graph loops | break the cycle |
-| exit 2, `duplicate_task` | that id already has a `dispatch` event | a new id, `--force`, or `foreman ledger replan` |
+| exit 2, `duplicate_task` | that id already has a `dispatch` event | a new id, `--force`, or `foreman-plane ledger replan` |
 | exit 2, `task_id_missing` | the card has no `[id]` | add one |
 | exit 3 | the artefact is missing, too small or missing the marker | read the run log in `runs/` |
 | `exit_code: 127`, `no such agent, or its command template is empty` | the agent name is not in `agents.json` | add the agent, or use one of the built-ins |
@@ -373,15 +440,18 @@ History is never rewritten or deleted.
 | `foreman_status` | ledger status of one task or of everything |
 | `foreman_cancel` | cancel a task; unknown ids are rejected |
 
+The tool names keep their `foreman_` prefix: they are a namespace inside MCP,
+not a binary name, so the CLI rename does not touch them.
+
 ## CLI
 
 ```
-foreman dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
-foreman status   [--task-id ID] [--json]
-foreman ledger   list | show | ready | blocked | cancel | replan
-foreman verify   --acceptance "<acceptance string>"
-foreman mcp
-foreman config
+foreman-plane dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
+foreman-plane status   [--task-id ID] [--json]
+foreman-plane ledger   list | show | ready | blocked | cancel | replan
+foreman-plane verify   --acceptance "<acceptance string>"
+foreman-plane mcp
+foreman-plane config
 ```
 
 Exit codes: `0` success, `2` blocked by the gate, `3` artefact acceptance failed,

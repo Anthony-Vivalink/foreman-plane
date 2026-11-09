@@ -15,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from foreman.config import load_config  # noqa: E402
-from foreman.runner import Runner  # noqa: E402
+from foreman_plane.config import load_config  # noqa: E402
+from foreman_plane.runner import Runner  # noqa: E402
 
 EXIT_SCRIPT = """import os
 import sys
