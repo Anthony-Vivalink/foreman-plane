@@ -14,15 +14,18 @@ criteria syntax.
 
 | marker          | semantic                                                    | field       |
 | --------------- | ----------------------------------------------------------- | ----------- |
-| `【id】`         | task id, shape `T-YYYYMMDD-NN`                              | `task_id`   |
-| `【depends_on】` | **hard** dependency — upstream must be terminal and `pass`  | `depends_on` |
-| `【needs_api】`  | **soft** dependency — artefact only has to exist            | `needs_api` |
-| `【验收】`       | acceptance artefact (+ optional criteria)                   | `acceptance` |
+| `[id]`          | task id, shape `T-YYYYMMDD-NN`                              | `task_id`   |
+| `[depends_on]`  | **hard** dependency — upstream must be terminal and `pass`  | `depends_on` |
+| `[needs_api]`   | **soft** dependency — artefact only has to exist            | `needs_api` |
+| `[acceptance]`  | acceptance artefact (+ optional criteria)                   | `acceptance` |
 
 Marker detection rules:
 
 * The marker may appear **anywhere** in the task text.
-* Brackets are optional and may be full width (`【】`) or half width (`[]`).
+* The half-width bracketed form above is canonical.  The full-width variants
+  (`【id】`, `【验收】`) and the colon forms (`id:`, `验收:`) stay accepted;
+  `acceptance` is an ASCII alias of `验收` and exists in the bracketed form only,
+  so English prose such as `acceptance criteria: ...` can never be read as a marker.
 * The colon is optional and may be full width (`：`) or half width (`:`).
 * Marker names are case insensitive (`ID`, `Depends_On`, `NEEDS_API`).
 * Whitespace around the marker may be a full-width space.
@@ -217,7 +220,7 @@ Supported methods:
 {
   "name": "foreman_dispatch",
   "arguments": {
-    "task": "【id】T-20261109-20\n【depends_on】T-20261109-01\n...",
+    "task": "[id] T-20261109-20\n[depends_on] T-20261109-01\n...",
     "agent": "dsh",          // optional, defaults to FOREMAN_AGENT or "generic"
     "workdir": "/srv/work",  // optional
     "force": false           // optional, overrides the duplicate check

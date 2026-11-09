@@ -23,17 +23,14 @@ Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正�
 > **agent 忘了的承诺不算承诺。** 通过与否只认磁盘上的产物，所以判据活得比产出它的
 > 那段会话更久。
 
-┌──────────────────────────────────────────────┐
-│              工头 foreman-plane              │
-│      契约解析 → 闸门 → 台账 → 产物验收       │
-└──────────┬─────────────────────────┬─────────┘
-           │                         │
-           │ MCP/stdio     MCP/stdio │
-┌──────────┬─────────┐    ┌──────────┬─────────┐
-│ 执行体             │    │ 执行体             │
-│ Claude Code        │    │ DeepSeek Harness   │
-│ Codex              │    │ 任意 CLI agent     │
-└────────────────────┘    └────────────────────┘
+┌────────────────────┐        ┌────────────────────────┐
+│ 执行体（可插拔）   │        │ 工头 foreman-plane     │
+│ Claude Code        │ ─────▶ │ 闸门 · 台账 · 产物验收 │
+│ Codex              │ ◀───── │                        │
+│ DeepSeek Harness   │        │                        │
+│ 任意 CLI agent     │        │                        │
+└────────────────────┘        └────────────────────────┘
+    MCP / stdio —— JSON-RPC 2.0，一行一个 JSON 对象
 
 * **跨会话** —— 台账比任何一段对话都活得久。
 * **跨实例** —— 多个 agent 共用同一张任务图。
@@ -46,7 +43,7 @@ Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正�
 
 | 能力 | 带来的变化 |
 | --- | --- |
-| **两级依赖闸门** | 带 `【depends_on】` 的单子，上游没终态、没通过、没验收就开不了工；`【needs_api】` 是软闸门，产物没就位只记一笔，任务照跑。 |
+| **两级依赖闸门** | 带 `[depends_on]` 的单子，上游没终态、没通过、没验收就开不了工；`[needs_api]` 是软闸门，产物没就位只记一笔，任务照跑。 |
 | **客观产物验收** | 通过与否由产物算出来——`min_bytes`、`sha256`、`contains`、`exit_code`。嘴上说写了报告、盘上没文件，照样判不通过。 |
 | **无幽灵派单** | 被闸门拦下的单子只写 `blocked` 事件、不写 `dispatch` 事件，台账里不会出现没跑过的派单。 |
 | **只追加台账** | 每个决策一行 JSON，历史不改写、不删除，能查询、能 diff、能被一个不是大模型的东西审计。 |
@@ -57,7 +54,7 @@ Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正�
 
 > 你：`这批报告先跑完，跑完再让下游合并`
 >
-> 工头：拆成三张单。下游那张挂着 `【depends_on】`，上游文件没落地，下游连跑都不跑。
+> 工头：拆成三张单。下游那张挂着 `[depends_on]`，上游文件没落地，下游连跑都不跑。
 > 全部跑完再对着产物核一遍，缺字段就是 `fail`，台账里写清楚缺在哪个文件。
 
 ## 安装
@@ -111,33 +108,52 @@ mcp:
 
 | 标记 | 含义 |
 | --- | --- |
-| `【id】` | 任务号，形如 `T-YYYYMMDD-NN` |
-| `【depends_on】` | **硬依赖**：上游必须已终态、已通过、已验收 |
-| `【needs_api】` | **软依赖**：相关产物就位即可开工，不要求完工 |
-| `【验收】` | 验收产物路径，外加可选的客观判据 |
+| `[id]` | 任务号，形如 `T-YYYYMMDD-NN` |
+| `[depends_on]` | **硬依赖**：上游必须已终态、已通过、已验收 |
+| `[needs_api]` | **软依赖**：相关产物就位即可开工，不要求完工 |
+| `[acceptance]` | 验收产物路径，外加可选的客观判据 |
 
 ```text
-【id】T-20261109-20
-【depends_on】T-20261109-01
-【needs_api】T-20261109-01#/var/lib/foreman/api/order_book.json
-【验收】reports/order_book_20261109.md::min_bytes=200::contains=结论
+[id] T-20261109-20
+[depends_on] T-20261109-01
+[needs_api] T-20261109-01#/var/lib/foreman/api/order_book.json
+[acceptance] reports/order_book_20261109.md::min_bytes=200::contains=结论
 
 请读取 order_book.json，产出分析报告并给出结论小节。
 ```
 
-标记写法很宽容：`【id】`、`[id]`、`ID:`、全角空格和全角冒号都认。但**绝不静默丢弃**——
-依赖标记解析不出来，这张单会被 `dependency_unparsed` 直接拒掉。
+上面这种半角方括号是规范写法。全角写法 `【id】`、冒号写法 `id:`、全角空格和全角冒号
+也都认。但**绝不静默丢弃**——依赖标记解析不出来，这张单会被 `dependency_unparsed`
+直接拒掉。
 
 ## 工头保证什么
 
+### 一张单怎么跑
+
+```text
+  任务卡
+    │
+    ├─ 解析 ──▶ 契约：id / 硬依赖 / 软依赖 / 验收判据
+    │
+    ├─ 闸门 ──▶ 硬依赖是否全部终态、通过、已验收？
+    │              ├─ 否 ──▶ blocked：台账记一笔，不执行，也不写 dispatch
+    │              └─ 是
+    │                   ▼
+    ├─ 执行 ──▶ 调用执行体：Claude Code / Codex / DSH / 任意命令
+    │
+    ├─ 验收 ──▶ 按产物判据核：min_bytes / sha256 / contains / exit_code
+    │
+    └─ 台账 ──▶ 追加一行 JSON：dispatch / running / done / blocked / …
+```
+
 ### 硬闸门 —— 任务绝不可能提前开跑
 
-带 `【depends_on】` 的单子，只有当每个上游都终态、`verdict=pass`、产物验收也过，
+带 `[depends_on]` 的单子，只有当每个上游都终态、`verdict=pass`、产物验收也过，
 才会被放行。否则工头只写一条 `blocked` 事件就停下——被拦下的单子**不会有**
 `dispatch` 事件，台账里不会出现幽灵派单。
 
 ```text
-【depends_on】T-20261109-01  →  上游 done 且 verdict=pass  →  放行执行
+[depends_on] T-20261109-01  →  上游 done 且 verdict=pass  →  放行执行
                              →  上游还在 running             →  blocked(dependency_pending)
                              →  上游查无此单                 →  blocked(dependency_unknown)
                              →  上游 verdict=fail            →  blocked(dependency_failed)
@@ -146,13 +162,13 @@ mcp:
 
 ### 软闸门 —— 产物没到位也允许开工
 
-`【needs_api】` 标的是「要就位但不要求完工」的产物。缺了就记 `needs_api_pending`，
+`[needs_api]` 标的是「要就位但不要求完工」的产物。缺了就记 `needs_api_pending`，
 任务照跑不误。
 
 ### 客观验收 —— 产物说话，不看模型自述
 
 ```text
-【验收】reports/report.md::min_bytes=200::sha256=<hex>::contains=结论
+[acceptance] reports/report.md::min_bytes=200::sha256=<hex>::contains=结论
 ```
 
 支持的判据：`min_bytes`、`sha256`、`contains`、`exit_code`。多个判据是「与」的关系，

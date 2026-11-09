@@ -24,17 +24,14 @@ dispatch, dependency gating, objective acceptance and an append-only ledger.
 > A promise the agent forgot is not a promise. The verdict is derived from files
 > on disk, so it outlives the session that produced it.
 
-┌──────────────────────────────────────────────┐
-│                foreman-plane                 │
-│    contract → gate → ledger → acceptance     │
-└──────────┬─────────────────────────┬─────────┘
-           │                         │
-           │ MCP/stdio     MCP/stdio │
-┌──────────┬─────────┐    ┌──────────┬─────────┐
-│ execution body     │    │ execution body     │
-│ Claude Code        │    │ DeepSeek Harness   │
-│ Codex              │    │ any CLI agent      │
-└────────────────────┘    └────────────────────┘
+┌────────────────────┐        ┌────────────────────────┐
+│ execution bodies   │        │ foreman-plane          │
+│ Claude Code        │ ─────▶ │ gate · ledger · acceptance│
+│ Codex              │ ◀───── │                        │
+│ DeepSeek Harness   │        │                        │
+│ any CLI agent      │        │                        │
+└────────────────────┘        └────────────────────────┘
+  MCP / stdio — JSON-RPC 2.0, one JSON object per line
 
 * **Cross session** — the ledger outlives every conversation.
 * **Cross instance** — several agents share one task graph.
@@ -47,7 +44,7 @@ Zero third-party dependencies. Python ≥ 3.10, standard library only.
 
 | Capability | What it changes |
 | --- | --- |
-| **Two-level dependency gate** | A card with `【depends_on】` cannot start until every upstream is terminal, passed and accepted. `【needs_api】` is the soft level: a missing artefact is reported, the task still runs. |
+| **Two-level dependency gate** | A card with `[depends_on]` cannot start until every upstream is terminal, passed and accepted. `[needs_api]` is the soft level: a missing artefact is reported, the task still runs. |
 | **Objective acceptance** | Pass and fail are computed from the artefact — `min_bytes`, `sha256`, `contains`, `exit_code`. A task that promises a report but writes no file fails. |
 | **No ghost dispatch** | A card stopped by the gate writes a `blocked` event and no `dispatch` event, so the ledger can never show a task that never ran. |
 | **Append-only ledger** | One JSON line per decision. History is never rewritten or deleted, and it can be queried, diffed and audited by something that is not an LLM. |
@@ -58,7 +55,7 @@ Zero third-party dependencies. Python ≥ 3.10, standard library only.
 
 > You: `Finish these reports first, then let the downstream job merge them.`
 >
-> foreman-plane: Three cards. The downstream one carries `【depends_on】`, so it
+> foreman-plane: Three cards. The downstream one carries `[depends_on]`, so it
 > cannot even start while the upstream files are missing. When everything is
 > done the artefacts get checked again, a missing field means `fail`, and the
 > ledger records which file fell short.
@@ -115,35 +112,55 @@ A task card is plain text. Four markers may appear anywhere in it:
 
 | Marker | Meaning |
 | --- | --- |
-| `【id】` | task id, shaped like `T-YYYYMMDD-NN` |
-| `【depends_on】` | **hard** dependency: the upstream must be terminal, passed and accepted |
-| `【needs_api】` | **soft** dependency: the artefact only has to exist, not be finished |
-| `【验收】` | acceptance artefact plus optional objective criteria |
+| `[id]` | task id, shaped like `T-YYYYMMDD-NN` |
+| `[depends_on]` | **hard** dependency: the upstream must be terminal, passed and accepted |
+| `[needs_api]` | **soft** dependency: the artefact only has to exist, not be finished |
+| `[acceptance]` | acceptance artefact plus optional objective criteria |
 
 ```text
-【id】T-20261109-20
-【depends_on】T-20261109-01
-【needs_api】T-20261109-01#/var/lib/foreman/api/order_book.json
-【验收】reports/order_book_20261109.md::min_bytes=200::contains=Conclusion
+[id] T-20261109-20
+[depends_on] T-20261109-01
+[needs_api] T-20261109-01#/var/lib/foreman/api/order_book.json
+[acceptance] reports/order_book_20261109.md::min_bytes=200::contains=Conclusion
 
 Read order_book.json, produce the report and add a Conclusion section.
 ```
 
-The marker syntax is forgiving: `【id】`, `[id]`, `ID:`, full-width spaces and
-full-width colons all work. What never happens is a silent drop — a dependency
-marker that cannot be parsed refuses the dispatch with `dependency_unparsed`.
+The half-width bracketed form above is the canonical one. The full-width
+variants such as `【id】` and the colon forms such as `id:` are still accepted,
+as are full-width spaces and colons. What never happens is a silent drop —
+a dependency marker that cannot be parsed refuses the dispatch with
+`dependency_unparsed`.
 
 ## What the plane guarantees
 
+### How one card runs
+
+```text
+  task card
+    │
+    ├─ parse ──▶ contract: id / hard dependencies / soft dependencies / acceptance criteria
+    │
+    ├─ gate ───▶ every hard dependency terminal, passed and accepted?
+    │              ├─ no  ──▶ blocked: one ledger line, nothing runs, no dispatch event
+    │              └─ yes
+    │                   ▼
+    ├─ run ────▶ call the execution body: Claude Code / Codex / DSH / any command
+    │
+    ├─ accept ─▶ check the artefact: min_bytes / sha256 / contains / exit_code
+    │
+    └─ ledger ─▶ append one JSON line: dispatch / running / done / blocked / …
+```
+
 ### Hard gate — a task never runs too early
 
-A card with `【depends_on】` is released only when every upstream task is
+A card with `[depends_on]` is released only when every upstream task is
 terminal, `verdict=pass` and artefact acceptance passed. Otherwise the plane
 writes a `blocked` event and stops. There is no `dispatch` event for a task
 that did not run, so the ledger cannot show a ghost dispatch.
 
 ```text
-【depends_on】T-20261109-01  →  upstream done, verdict=pass   →  released
+[depends_on] T-20261109-01  →  upstream done, verdict=pass   →  released
                              →  upstream still running        →  blocked(dependency_pending)
                              →  upstream unknown               →  blocked(dependency_unknown)
                              →  upstream verdict=fail          →  blocked(dependency_failed)
@@ -152,14 +169,14 @@ that did not run, so the ledger cannot show a ghost dispatch.
 
 ### Soft gate — a task may start without a missing artefact
 
-`【needs_api】` marks artefacts that must be ready but do not have to be
+`[needs_api]` marks artefacts that must be ready but do not have to be
 finished. A missing artefact is reported as `needs_api_pending` and the task
 still runs.
 
 ### Objective acceptance — the artefact decides, not the model
 
 ```text
-【验收】reports/report.md::min_bytes=200::sha256=<hex>::contains=Conclusion
+[acceptance] reports/report.md::min_bytes=200::sha256=<hex>::contains=Conclusion
 ```
 
 Supported criteria: `min_bytes`, `sha256`, `contains`, `exit_code`. All

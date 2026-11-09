@@ -9,5 +9,5 @@ Zero third-party dependencies: standard library only, Python >= 3.10.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = ["__version__"]

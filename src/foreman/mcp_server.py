@@ -28,7 +28,7 @@ TOOLS: list[dict[str, Any]] = [
         "name": "foreman_dispatch",
         "description": (
             "Dispatch a task card to an execution body. The card may carry the markers "
-            "【id】 【depends_on】 【needs_api】 【验收】. Hard dependencies are gated: "
+            "[id] [depends_on] [needs_api] [acceptance]. Hard dependencies are gated: "
             "when one is not satisfied the task is never executed and only a blocked "
             "event is written."
         ),

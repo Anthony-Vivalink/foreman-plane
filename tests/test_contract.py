@@ -45,6 +45,34 @@ class ContractParsingTests(unittest.TestCase):
         self.assertFalse(card.needs_api_unparsed)
         self.assertFalse(card.acceptance_unparsed)
 
+    def test_canonical_half_width_markers(self) -> None:
+        text = (
+            "[id] T-20261109-20\n"
+            "[depends_on] T-20261109-01\n"
+            "[needs_api] /tmp/api/report.json\n"
+            "[acceptance] out/report.md::min_bytes=100\n"
+        )
+        card = parse_task_card(text)
+        self.assertEqual(card.task_id, "T-20261109-20")
+        self.assertEqual(card.depends_on, ["T-20261109-01"])
+        self.assertEqual(card.needs_api, ["/tmp/api/report.json"])
+        self.assertEqual(card.acceptance, "out/report.md::min_bytes=100")
+        self.assertFalse(card.depends_on_unparsed)
+        self.assertFalse(card.needs_api_unparsed)
+        self.assertFalse(card.acceptance_unparsed)
+
+    def test_acceptance_alias_does_not_fire_on_english_prose(self) -> None:
+        card = parse_task_card("[acceptance] out/report.md")
+        self.assertEqual(card.acceptance, "out/report.md")
+        self.assertFalse(card.acceptance_unparsed)
+
+        prose = parse_task_card(
+            "acceptance criteria: the agent should describe its own work\n"
+            "[id] T-20261109-20\n"
+        )
+        self.assertIsNone(prose.acceptance)
+        self.assertFalse(prose.acceptance_unparsed)
+
     def test_full_width_space_is_tolerated(self) -> None:
         card = parse_task_card("【id】　T-20261109-20\n【depends_on】　T-20261109-01")
         self.assertEqual(card.task_id, "T-20261109-20")

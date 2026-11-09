@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.1
+
+### Changed
+
+- **The canonical task card markers are now half-width brackets** — `[id]`,
+  `[depends_on]`, `[needs_api]`, `[acceptance]`.  The full-width forms
+  (`【id】`, `【验收】`) and the colon forms (`id:`, `验收:`) stay accepted, so
+  cards written for 0.1.0 keep working untouched.
+- **`acceptance` is an ASCII alias of `验收`** and is recognised in the
+  bracketed form only.  English prose such as `acceptance criteria: ...` can
+  therefore never be mistaken for a marker.
+- **READMEs rewritten in the DSH plugin house style** — an English `README.md`
+  and a Chinese `README_ZH.md`, each in one language, with a language switcher,
+  badges, a "what it feels like" section and the DSH / MCP install path.
+- Prose no longer uses parentheses asides; em dashes and tables carry the
+  same meaning.
+
+### Added
+
+- ASCII diagram of the plane, drawn so every line is exactly 48 columns wide in
+  both language versions.
+
 ## 0.1.0
 
 First release.

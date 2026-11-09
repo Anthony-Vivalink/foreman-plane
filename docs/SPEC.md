@@ -59,13 +59,17 @@ foreman-plane/
 
 | 标记 | 语义 | 产出字段 |
 |---|---|---|
-| `【id】` | 任务号，形如 `T-YYYYMMDD-NN` | `task_id` |
-| `【depends_on】` | **硬依赖**：上游须终态且 `verdict=pass` | `depends_on: list[str]` |
-| `【needs_api】` | **软依赖**：产物就位即可开工 | `needs_api: list[str]` |
-| `【验收】` | 验收产物路径（可带判据） | `acceptance: str` |
+| `[id]` | 任务号，形如 `T-YYYYMMDD-NN` | `task_id` |
+| `[depends_on]` | **硬依赖**：上游须终态且 `verdict=pass` | `depends_on: list[str]` |
+| `[needs_api]` | **软依赖**：产物就位即可开工 | `needs_api: list[str]` |
+| `[acceptance]` | 验收产物路径（可带判据） | `acceptance: str` |
 
 正则骨架（全角/半角均匹配）：
-- 标记名：`[【\[]?\s*(id|depends_on|needs_api|验收)\s*[】\]]?\s*[:：]?\s*`
+- 规范写法为半角方括号：`[id]` / `[depends_on]` / `[needs_api]` / `[acceptance]`
+- 方括号形式标记名：`[【\[]?\s*(id|depends_on|needs_api|验收|acceptance)\s*[】\]]?\s*[:：]?\s*`
+- 冒号形式标记名：`(?<![A-Za-z0-9_"'\[{])(id|depends_on|needs_api|验收)\s*[:：]\s*`
+  （`acceptance` 只在方括号形式里认，避免英文散文 `acceptance criteria:` 被误判成标记）
+- 全角写法 `【id】` / `【验收】` 与冒号写法 `id:` / `验收:` 继续兼容
 - 任务号：`T-\d{8}-\d{2,}`（`\d{8}` 必须是真日期：年 2000-2099，月 1-12，日 1-31；用 `datetime.date()` 校验真实性）
 - 依赖 id：同上任务号正则；`needs_api` 允许 `id#path` 前缀形式
 
@@ -249,7 +253,7 @@ class RunResult:
 工具：
 1. `foreman_dispatch(task: str, agent?: str, workdir?: str, force?: bool)`
    - 全流程：解析契约 → 幂等/重复检查 → 闸门 → (BLOCK: 写 `blocked` 事件并返回 `{"ok":false,"blocked":true,"reason":...,"missing":[...]}`，**不执行**) → (放行: 写 `dispatch` → 执行 → 写 `running`/`done` → 产物验收 → 返回回执 `{"ok":bool,"task_id":...,"verdict":...,"acceptance_ok":...,"needs_api_pending":bool,"exit_code":...,"duration_s":...}`)
-   - **`task` 文本里带 `【depends_on】` 指向不存在的任务 → 必须返回 blocked，且 runner 完全没被调用**（这条要能被测试断言）
+   - **`task` 文本里带 `[depends_on]` 指向不存在的任务 → 必须返回 blocked，且 runner 完全没被调用**（这条要能被测试断言）
 2. `foreman_status(task_id?: str)` → 台账状态摘要
 3. `foreman_cancel(task_id: str, reason?: str)` → 取消（未知 id → error）
 

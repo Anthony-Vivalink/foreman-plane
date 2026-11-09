@@ -5,11 +5,16 @@ Four markers may appear anywhere in the task text:
 ============  ==================================  =====================
 marker        meaning                              field
 ============  ==================================  =====================
-``【id】``     task id ``T-YYYYMMDD-NN``           ``task_id``
-``【depends_on】``  hard dependency (must be done+pass)  ``depends_on``
-``【needs_api】``   soft dependency (artefact ready)      ``needs_api``
-``【验收】``   acceptance artefact (+ criteria)    ``acceptance``
-============  ==================================  =====================
+``[id]``        task id ``T-YYYYMMDD-NN``           ``task_id``
+``[depends_on]``  hard dependency (must be done+pass)  ``depends_on``
+``[needs_api]``   soft dependency (artefact ready)      ``needs_api``
+``[acceptance]``  acceptance artefact (+ criteria)    ``acceptance``
+==============  ==================================  =====================
+
+The half-width bracketed form above is canonical.  The full-width variants
+``【id】`` / ``【depends_on】`` / ``【needs_api】`` / ``【验收】`` and the
+colon forms ``id:`` / ``depends_on:`` / ``needs_api:`` / ``验收:`` stay
+accepted, so cards written for older systems keep working.
 
 Parsing never raises.  A marker that is present but yields no legal token
 is reported through an explicit ``*_unparsed`` flag — never as "no
@@ -40,11 +45,17 @@ PATH_TOKEN_RE = re.compile(r"^[A-Za-z0-9_\-./~]{1,200}(?:#[A-Za-z0-9_\-./~]{1,20
 #: Acceptance path: same character class, without the ``id#path`` prefix form.
 ACCEPT_PATH_RE = re.compile(r"^[A-Za-z0-9_\-./~]{1,200}$")
 
-_MARKER_NAME = r"(?P<name>id|depends_on|needs_api|验收)"
+#: Marker names accepted in the bracketed form.  ``acceptance`` is the
+#: ASCII spelling of ``验收`` and exists *only* in this form, so English
+#: prose such as "acceptance criteria: ..." can never be read as a marker.
+_BRACKETED_NAME = r"(?P<name>id|depends_on|needs_api|验收|acceptance)"
 
-#: ``【id】`` / ``[id]`` / ``【id:】`` / ``[id]:`` — bracketed form.
+#: Marker names accepted in the colon form.
+_COLON_NAME = r"(?P<name>id|depends_on|needs_api|验收)"
+
+#: ``[id]`` / ``【id】`` / ``[id]:`` / ``【id:】`` — bracketed form.
 _BRACKETED_RE = re.compile(
-    r"[【\[]\s*" + _MARKER_NAME + r"\s*[:：]?\s*[】\]]\s*[:：]?\s*",
+    r"[【\[]\s*" + _BRACKETED_NAME + r"\s*[:：]?\s*[】\]]\s*[:：]?\s*",
     re.IGNORECASE,
 )
 
@@ -52,9 +63,12 @@ _BRACKETED_RE = re.compile(
 #: (``{"depends_on": []}``) from being mistaken for a marker while still
 #: accepting a marker that follows CJK text or whitespace.
 _COLON_RE = re.compile(
-    r"(?<![A-Za-z0-9_\"'\[{])" + _MARKER_NAME + r"\s*[:：]\s*",
+    r"(?<![A-Za-z0-9_\"'\[{])" + _COLON_NAME + r"\s*[:：]\s*",
     re.IGNORECASE,
 )
+
+#: Marker names that carry the acceptance artefact.
+ACCEPTANCE_NAMES = ("验收", "acceptance")
 
 
 @dataclass
@@ -212,11 +226,16 @@ def parse_task_card(text: str) -> TaskCard:
             card.needs_api = tokens
             card.needs_api_unparsed = not tokens
 
-        if "验收" in by_name:
+        accept_indices = [
+            index
+            for name in ACCEPTANCE_NAMES
+            for index in by_name.get(name, [])
+        ]
+        if accept_indices:
             candidates: list[str] = []
             usable = False
-            for index in by_name["验收"]:
-                for value in _candidate_values(raw, markers, index, "验收"):
+            for index in accept_indices:
+                for value in _candidate_values(raw, markers, index, "acceptance"):
                     candidates.append(value)
                     path, _criteria = split_acceptance(value)
                     if path and ACCEPT_PATH_RE.match(path):
@@ -230,5 +249,5 @@ def parse_task_card(text: str) -> TaskCard:
         card.acceptance = None
         card.depends_on_unparsed = "depends_on" in raw.lower()
         card.needs_api_unparsed = "needs_api" in raw.lower()
-        card.acceptance_unparsed = "验收" in raw
+        card.acceptance_unparsed = any(name in raw.lower() for name in ACCEPTANCE_NAMES)
     return card

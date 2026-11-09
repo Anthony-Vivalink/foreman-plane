@@ -5,20 +5,20 @@ rest of the text is the task itself and is handed to the execution body
 unchanged.
 
 ```text
-【id】T-20261109-20
-【depends_on】T-20261109-01
-【needs_api】T-20261109-01#/var/lib/foreman/api/order_book.json
-【验收】reports/order_book_20261109.md::min_bytes=200::contains=结论
+[id] T-20261109-20
+[depends_on] T-20261109-01
+[needs_api] T-20261109-01#/var/lib/foreman/api/order_book.json
+[acceptance] reports/order_book_20261109.md::min_bytes=200::contains=结论
 ```
 
 Line by line:
 
 | marker           | meaning                                                       |
 | ---------------- | ------------------------------------------------------------- |
-| `【id】`          | task id, `T-YYYYMMDD-NN`; the 8 digits must be a real date    |
-| `【depends_on】`  | **hard** dependency: the upstream must be done and `pass`     |
-| `【needs_api】`   | **soft** dependency: an artefact that only has to exist        |
-| `【验收】`         | acceptance artefact path plus optional objective criteria      |
+| `[id]`           | task id, `T-YYYYMMDD-NN`; the 8 digits must be a real date    |
+| `[depends_on]`   | **hard** dependency: the upstream must be done and `pass`     |
+| `[needs_api]`    | **soft** dependency: an artefact that only has to exist        |
+| `[acceptance]`   | acceptance artefact path plus optional objective criteria      |
 
 ## The task body
 
@@ -29,11 +29,13 @@ Line by line:
 
 ## Notes
 
-* Marker syntax is forgiving: `【id】`, `[id]`, `ID:` and `id:` are all
-  accepted, as are full-width spaces and colons.
+* The half-width bracketed form is canonical.  The full-width variants such as
+  `【id】` and the colon forms such as `id:` are still accepted, as are
+  full-width spaces and colons.  `acceptance` is an ASCII alias of `【验收】`
+  and exists in the bracketed form only.
 * A hard dependency that cannot be parsed is **never** silently dropped.
   The dispatch is refused with `dependency_unparsed` — fail closed.
-* `【验收】` takes `path` or `path::key=value::key=value`.  Supported
+* `[acceptance]` takes `path` or `path::key=value::key=value`.  Supported
   criteria: `min_bytes`, `sha256`, `contains`, `exit_code`.  All criteria
   are ANDed.
 * Relative artefact paths are resolved against the working directory of the
