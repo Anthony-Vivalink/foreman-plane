@@ -23,8 +23,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
-- ASCII diagram of the plane, drawn so every line is exactly 48 columns wide in
-  both language versions.
+- **Rendered diagrams** for the architecture and the task-card pipeline, in
+  English and Chinese, generated deterministically by
+  `scripts/render_diagrams.py` (Graphviz).  The READMEs embed the PNGs through
+  absolute raw URLs so PyPI renders them as well.
+- The ASCII art stays as the text fallback and is now inside a code fence — it
+  used to sit outside one, so GitHub collapsed it into a single run-on line.
+  Box widths are computed by display width, so full-width CJK columns line up.
 
 ## 0.1.0
 
