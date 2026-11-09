@@ -1,146 +1,86 @@
+<div align="center">
+
 # foreman-plane
 
-**A task governance plane that runs *outside* your agent harness.**
+### The task governance plane that runs outside your agent harness
 
-foreman-plane (the "foreman") is the layer *above* the agent, not inside it.
-Claude Code, Codex, DeepSeek Harness or any CLI agent are pluggable
-execution bodies; the plane owns the parts an agent session cannot own:
-dispatch, dependency gating, objective acceptance and an append-only audit
-trail.
+[![PyPI version](https://img.shields.io/pypi/v/foreman-plane?style=flat-square&color=5B4CF0)](https://pypi.org/project/foreman-plane/)
+[![downloads](https://badgen.net/pypi/dm/foreman-plane?label=downloads&color=4E9BF1)](https://pypi.org/project/foreman-plane/)
+![Protocol](https://img.shields.io/badge/Protocol-MCP-blue)
+![Python](https://img.shields.io/badge/Python-%3E%3D3.10-blue)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-```
-        ┌───────────────────────────────────────────┐
-        │            foreman-plane (the foreman)    │
-        │  contract → gate → ledger → acceptance    │
-        └───┬───────────────┬───────────────┬───────┘
-            │ MCP/stdio     │ MCP/stdio     │ MCP/stdio
-       ┌────▼─────┐    ┌────▼─────┐    ┌────▼─────┐
-       │ Claude   │    │  Codex   │    │   DSH    │      ← execution bodies
-       └──────────┘    └──────────┘    └──────────┘
-```
+**English** · [简体中文](README_ZH.md)
+
+</div>
+
+## One sentence
+
+**foreman-plane is a governance plane that runs outside the agent harness.**
+DeepSeek Harness, Claude Code, Codex and any CLI agent are interchangeable
+execution bodies. What the plane owns is the part a session cannot own:
+dispatch, dependency gating, objective acceptance and an append-only ledger.
+
+> A promise the agent forgot is not a promise. The verdict is derived from files
+> on disk, so it outlives the session that produced it.
+
+┌──────────────────────────────────────────────┐
+│                foreman-plane                 │
+│    contract → gate → ledger → acceptance     │
+└──────────┬─────────────────────────┬─────────┘
+           │                         │
+           │ MCP/stdio     MCP/stdio │
+┌──────────┬─────────┐    ┌──────────┬─────────┐
+│ execution body     │    │ execution body     │
+│ Claude Code        │    │ DeepSeek Harness   │
+│ Codex              │    │ any CLI agent      │
+└────────────────────┘    └────────────────────┘
 
 * **Cross session** — the ledger outlives every conversation.
 * **Cross instance** — several agents share one task graph.
 * **Cross day** — a task dispatched today can be resumed tomorrow by any body.
-* **Outside the harness** — the plane is a plain process; no agent framework
-  has to be patched to use it.
+* **Zero intrusion** — the plane is a plain process, no agent framework has to be patched.
 
-Zero third-party dependencies. Python ≥ 3.10. Standard library only.
+Zero third-party dependencies. Python ≥ 3.10, standard library only.
 
----
+## Why foreman-plane?
 
-## Quick start
+| Capability | What it changes |
+| --- | --- |
+| **Two-level dependency gate** | A card with `【depends_on】` cannot start until every upstream is terminal, passed and accepted. `【needs_api】` is the soft level: a missing artefact is reported, the task still runs. |
+| **Objective acceptance** | Pass and fail are computed from the artefact — `min_bytes`, `sha256`, `contains`, `exit_code`. A task that promises a report but writes no file fails. |
+| **No ghost dispatch** | A card stopped by the gate writes a `blocked` event and no `dispatch` event, so the ledger can never show a task that never ran. |
+| **Append-only ledger** | One JSON line per decision. History is never rewritten or deleted, and it can be queried, diffed and audited by something that is not an LLM. |
+| **Pluggable execution bodies** | The plane picks no model and does not care which command runs a card. Swap the command, keep the governance. |
+| **Unparsed dependencies are fatal** | A dependency marker that cannot be parsed refuses the dispatch. It is never silently dropped. |
+
+## What it feels like
+
+> You: `Finish these reports first, then let the downstream job merge them.`
+>
+> foreman-plane: Three cards. The downstream one carries `【depends_on】`, so it
+> cannot even start while the upstream files are missing. When everything is
+> done the artefacts get checked again, a missing field means `fail`, and the
+> ledger records which file fell short.
+
+## Install
 
 ```bash
-# 1. run it straight from the checkout
+pip install foreman-plane
+```
+
+Or run it straight from a checkout:
+
+```bash
 cd foreman-plane
 export PYTHONPATH="$PWD/src"
 export FOREMAN_HOME="$PWD/.foreman"
-
-# 2. declare one execution body
-cat > "$FOREMAN_HOME/agents.json" <<'JSON'
-{"agents": {"mybot": {"command": "mybot run --prompt {task}"}}}
-JSON
-
-# 3. dispatch a task card
-cat > card.md <<'MD'
-【id】T-20261109-20
-【depends_on】T-20261109-01
-【验收】reports/report.md::min_bytes=200
-写一份报告。
-MD
-
-python3 -m foreman.cli dispatch --file card.md --agent mybot --json
 ```
 
-`python -m foreman.cli` and the `foreman` console script are equivalent.
+### Wire it into DSH
 
----
-
-## The task card
-
-A task card is plain text.  Four markers may appear anywhere in it:
-
-| marker          | meaning                                                      |
-| --------------- | ------------------------------------------------------------ |
-| `【id】`         | task id, `T-YYYYMMDD-NN`                                      |
-| `【depends_on】` | **hard** dependency — the upstream must be done and `pass`    |
-| `【needs_api】`  | **soft** dependency — an artefact that only has to exist       |
-| `【验收】`       | acceptance artefact plus optional objective criteria           |
-
-```text
-【id】T-20261109-20
-【depends_on】T-20261109-01
-【needs_api】T-20261109-01#/var/lib/foreman/api/order_book.json
-【验收】reports/order_book_20261109.md::min_bytes=200::contains=结论
-
-请读取 order_book.json，产出分析报告并给出结论小节。
-```
-
-Marker syntax is forgiving (`【id】`, `[id]`, `ID:`, full-width spaces and
-colons all work), but a dependency that cannot be parsed is **never**
-silently dropped: the dispatch is refused with `dependency_unparsed`.
-
----
-
-## What the plane guarantees
-
-### Hard gate — a task never runs too early
-
-A task with `【depends_on】` only starts when every upstream task is
-terminal, passed **and** accepted.  Otherwise the plane writes a `blocked`
-event and stops.  There is no `dispatch` event for a task that did not run,
-so the ledger cannot show a ghost dispatch.
-
-```text
-【depends_on】T-20261109-01  →  T-20261109-01 done, verdict=pass  →  dispatch
-                             →  T-20261109-01 still running       →  blocked(dependency_pending)
-                             →  T-20261109-01 unknown              →  blocked(dependency_unknown)
-                             →  T-20261109-01 verdict=fail         →  blocked(dependency_failed)
-                             →  unparsable dependency marker       →  blocked(dependency_unparsed)
-```
-
-### Soft gate — a task may start without a missing artefact
-
-`【needs_api】` marks artefacts that must be *ready* but do not have to be
-finished.  A missing artefact is reported as `needs_api_pending` and the
-task still runs.
-
-### Objective acceptance — the artefact decides, not the model
-
-```text
-【验收】reports/report.md::min_bytes=200::sha256=<hex>::contains=结论
-```
-
-Supported criteria: `min_bytes`, `sha256`, `contains`, `exit_code`.  All
-criteria are ANDed, relative paths resolve against the working directory,
-and an unknown criterion fails closed.
-
-### Append-only audit trail
-
-Every decision is one JSON line in `${FOREMAN_HOME}/ledger.jsonl`:
-
-```json
-{"ts":"2026-11-09T09:41:02.113456+00:00","event":"dispatch","task_id":"T-20261109-20","actor":"foreman","depends_on":["T-20261109-01"],"needs_api":[],"acceptance":"reports/report.md::min_bytes=200","needs_api_pending":false,"detail":{}}
-```
-
-Event types: `dispatch`, `running`, `blocked`, `done`, `cancelled`,
-`replan`.  History is never rewritten or deleted.
-
----
-
-## MCP integration
-
-The plane ships an MCP server that speaks JSON-RPC 2.0 over stdio with
-NDJSON framing (one JSON object per line).  Point any MCP client at it:
-
-```bash
-python3 -m foreman.mcp_server
-```
-
-For a harness that loads MCP servers from a patch file, the entry looks
-like this (the exact field names follow the MCP client in use — only the
-stdio JSON-RPC handshake is fixed by the plane):
+foreman-plane ships an MCP server, so no plugin code is needed. Point the
+profile patch at the stdio server and DSH talks to the plane directly:
 
 ```yaml
 # ~/.dsh/profiles/headless/cordis.patch.yml
@@ -155,15 +95,95 @@ mcp:
         FOREMAN_HOME: /var/lib/foreman
 ```
 
-Three tools are exposed:
+### Wire it into Claude Code, Codex or any MCP client
 
-| tool              | purpose                                                    |
-| ----------------- | ---------------------------------------------------------- |
-| `foreman_dispatch`| dispatch a task card (parse → gate → run → accept)         |
-| `foreman_status`  | ledger status of one task or of everything                 |
-| `foreman_cancel`  | cancel a task (unknown ids are rejected)                   |
+```json
+{
+  "mcpServers": {
+    "foreman": {
+      "command": "python3",
+      "args": ["-m", "foreman.mcp_server"],
+      "env": { "FOREMAN_HOME": "/var/lib/foreman" }
+    }
+  }
+}
+```
 
----
+## The task card
+
+A task card is plain text. Four markers may appear anywhere in it:
+
+| Marker | Meaning |
+| --- | --- |
+| `【id】` | task id, shaped like `T-YYYYMMDD-NN` |
+| `【depends_on】` | **hard** dependency: the upstream must be terminal, passed and accepted |
+| `【needs_api】` | **soft** dependency: the artefact only has to exist, not be finished |
+| `【验收】` | acceptance artefact plus optional objective criteria |
+
+```text
+【id】T-20261109-20
+【depends_on】T-20261109-01
+【needs_api】T-20261109-01#/var/lib/foreman/api/order_book.json
+【验收】reports/order_book_20261109.md::min_bytes=200::contains=Conclusion
+
+Read order_book.json, produce the report and add a Conclusion section.
+```
+
+The marker syntax is forgiving: `【id】`, `[id]`, `ID:`, full-width spaces and
+full-width colons all work. What never happens is a silent drop — a dependency
+marker that cannot be parsed refuses the dispatch with `dependency_unparsed`.
+
+## What the plane guarantees
+
+### Hard gate — a task never runs too early
+
+A card with `【depends_on】` is released only when every upstream task is
+terminal, `verdict=pass` and artefact acceptance passed. Otherwise the plane
+writes a `blocked` event and stops. There is no `dispatch` event for a task
+that did not run, so the ledger cannot show a ghost dispatch.
+
+```text
+【depends_on】T-20261109-01  →  upstream done, verdict=pass   →  released
+                             →  upstream still running        →  blocked(dependency_pending)
+                             →  upstream unknown               →  blocked(dependency_unknown)
+                             →  upstream verdict=fail          →  blocked(dependency_failed)
+                             →  unparsable dependency marker   →  blocked(dependency_unparsed)
+```
+
+### Soft gate — a task may start without a missing artefact
+
+`【needs_api】` marks artefacts that must be ready but do not have to be
+finished. A missing artefact is reported as `needs_api_pending` and the task
+still runs.
+
+### Objective acceptance — the artefact decides, not the model
+
+```text
+【验收】reports/report.md::min_bytes=200::sha256=<hex>::contains=Conclusion
+```
+
+Supported criteria: `min_bytes`, `sha256`, `contains`, `exit_code`. All
+criteria are ANDed, relative paths resolve against the working directory, and
+an unknown criterion fails closed.
+
+### Append-only audit trail
+
+Every decision is one JSON line in `${FOREMAN_HOME}/ledger.jsonl`:
+
+```json
+{"ts":"2026-11-09T09:41:02.113456+00:00","event":"dispatch","task_id":"T-20261109-20","actor":"foreman","depends_on":["T-20261109-01"],"needs_api":[],"acceptance":"reports/report.md::min_bytes=200","needs_api_pending":false,"detail":{}}
+```
+
+Event types: `dispatch`, `running`, `blocked`, `done`, `cancelled`, `replan`.
+History is never rewritten or deleted.
+
+## MCP tools
+
+| Tool | Purpose |
+| --- | --- |
+| `foreman_dispatch` | dispatch a task card: parse, gate, run, accept |
+| `foreman_status` | ledger status of one task or of everything |
+| `foreman_cancel` | cancel a task; unknown ids are rejected |
 
 ## CLI
 
@@ -171,50 +191,31 @@ Three tools are exposed:
 foreman dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
 foreman status   [--task-id ID] [--json]
 foreman ledger   list | show | ready | blocked | cancel | replan
-foreman verify   --acceptance "<验收串>"
+foreman verify   --acceptance "<acceptance string>"
 foreman mcp
 foreman config
 ```
 
-Exit codes: `0` success · `2` blocked by the gate · `3` artefact acceptance
-failed · `1` any other error.
-
----
+Exit codes: `0` success, `2` blocked by the gate, `3` artefact acceptance failed,
+`1` anything else.
 
 ## Configuration
 
-| variable          | meaning                                              |
-| ----------------- | ---------------------------------------------------- |
-| `FOREMAN_HOME`    | plane home (ledger, runs, agents.json)                |
-| `FOREMAN_TIMEOUT` | execution timeout in seconds (default 900)            |
-| `FOREMAN_AGENT`   | default execution body (default `generic`)            |
-| `FOREMAN_ACTOR`   | actor recorded in the ledger (default `foreman`)      |
+| Variable | Meaning |
+| --- | --- |
+| `FOREMAN_HOME` | plane home: ledger, run logs, agents.json |
+| `FOREMAN_TIMEOUT` | execution timeout in seconds, default 900 |
+| `FOREMAN_AGENT` | default execution body, default `generic` |
+| `FOREMAN_ACTOR` | actor recorded in the ledger, default `foreman` |
 
-`FOREMAN_HOME` is resolved as: the environment variable → `$HOME/.foreman`
-→ `<cwd>/.foreman`.  When `HOME` is not set the plane still works.
+`FOREMAN_HOME` resolves as the environment variable, then `$HOME/.foreman`,
+then `<cwd>/.foreman`. The plane still works when `HOME` is not set.
 
----
+Execution bodies live in `${FOREMAN_HOME}/agents.json`, one command per name:
 
-## How this differs from other approaches
-
-* **Against "the agent will remember"** — a session that forgets cannot
-  enforce a dependency.  The gate is a separate process with its own
-  durable state, so it keeps working across sessions, agents and days.
-* **Against "the agent will self-report"** — the verdict is derived from an
-  artefact on disk (`min_bytes`, `sha256`, `contains`, `exit_code`), not from
-  a sentence in the transcript.  A task that promises a report but writes no
-  report fails.
-* **Against "one big agent"** — the plane does not choose a model and does
-  not care which agent runs a task.  Execution bodies are interchangeable
-  commands; governance stays in one place.
-* **Against "a workflow engine"** — there is no DAG runtime, no scheduler and
-  no background worker.  The plane is a ledger plus a gate: it decides
-  *whether* a task may start, and leaves *how* to the body that is wired in.
-* **Against "a chat transcript as state"** — the ledger is append-only and
-  machine readable, so it can be queried, diffed and audited by something
-  that is not an LLM.
-
----
+```json
+{"agents": {"mybot": {"command": "mybot run --prompt {task}"}}}
+```
 
 ## Development
 
@@ -222,8 +223,8 @@ failed · `1` any other error.
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The specification lives in [`docs/SPEC.md`](docs/SPEC.md), the wire
-contract in [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+The specification lives in [`docs/SPEC.md`](docs/SPEC.md), the wire contract in
+[`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
 ## License
 
