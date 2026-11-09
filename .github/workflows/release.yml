@@ -67,6 +67,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # checkout is required: `gh` resolves the repository from the git
+      # context, and without it every `gh release` call exits 1.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           name: dist
@@ -74,11 +79,18 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
+          set -euo pipefail
+          ls -l dist
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists — uploading assets only"
             gh release upload "$TAG" dist/* --clobber
+          elif [ -f docs/RELEASE_NOTES.md ]; then
+            gh release create "$TAG" dist/* \
+              --title "foreman-plane $TAG" \
+              --notes-file docs/RELEASE_NOTES.md
           else
             gh release create "$TAG" dist/* \
               --title "foreman-plane $TAG" \
