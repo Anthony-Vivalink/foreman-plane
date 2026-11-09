@@ -124,6 +124,21 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 3, done.stdout + done.stderr)
 
+    def test_receipt_carries_stderr_when_the_agent_cannot_start(self) -> None:
+        """A failure before the agent starts must still say why."""
+        card = self.home / "card.md"
+        card.write_text("[id] T-20261109-21\n干活。\n", encoding="utf-8")
+        done = self._run("dispatch", "--file", str(card), "--agent", "nope", "--json")
+        self.assertNotEqual(done.returncode, 0)
+        payload = json.loads(done.stdout)
+        self.assertEqual(payload["exit_code"], 127)
+        self.assertIn("agent not found", payload["stderr"])
+
+        other = self.home / "card2.md"
+        other.write_text("[id] T-20261109-22\n干活。\n", encoding="utf-8")
+        text = self._run("dispatch", "--file", str(other), "--agent", "nope")
+        self.assertIn("stderr:", text.stdout)
+
     def test_verify_command(self) -> None:
         self.artefact.write_text("hello", encoding="utf-8")
         ok = self._run(

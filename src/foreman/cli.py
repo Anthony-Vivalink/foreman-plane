@@ -144,6 +144,8 @@ def _dispatch_text(payload: dict) -> str:
     lines.append(f"verdict: {payload.get('verdict')}")
     lines.append(f"acceptance_ok: {payload.get('acceptance_ok')}")
     lines.append(f"exit_code: {payload.get('exit_code')}")
+    if payload.get("stderr"):
+        lines.append(f"stderr: {payload.get('stderr')}")
     if payload.get("needs_api_pending"):
         lines.append("needs_api_pending: true")
     return "\n".join(lines)

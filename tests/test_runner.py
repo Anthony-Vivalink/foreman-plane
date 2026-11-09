@@ -52,6 +52,9 @@ class RunnerTests(unittest.TestCase):
                 },
                 "missing": {"command": "foreman-plane-no-such-binary-xyz {task}"},
                 "empty": {"command": ""},
+                "no_placeholder": {
+                    "command": f'"{sys.executable}" "{self.exit_script}"',
+                },
                 "wd": {
                     "command": f'"{sys.executable}" "{self.exit_script}" {{workdir}} {{task}}',
                 },
@@ -90,6 +93,25 @@ class RunnerTests(unittest.TestCase):
     def test_unknown_agent_yields_127(self) -> None:
         result = self._runner().run("anything", agent="nope")
         self.assertEqual(result.exit_code, 127)
+
+    def test_preflight_failure_still_writes_a_run_log(self) -> None:
+        """A failure before the subprocess starts must leave a log to read."""
+        self._runner().run("anything", agent="nope")
+        logs = list((self.home / "runs").glob("*.log"))
+        self.assertTrue(logs, "a pre-flight failure must leave a diagnosable log")
+        self.assertIn("agent not found", logs[0].read_text(encoding="utf-8"))
+
+    def test_failure_reasons_are_distinguishable(self) -> None:
+        """Each way of failing to start must say which one it was."""
+        runner = self._runner()
+        unknown = runner.run("x", agent="nope").stderr
+        empty = runner.run("x", agent="empty").stderr
+        missing_binary = runner.run("x", agent="missing").stderr
+        no_placeholder = runner.run("x", agent="no_placeholder").stderr
+        self.assertIn("no such agent", unknown)
+        self.assertIn("empty", empty)
+        self.assertIn("not on PATH", missing_binary)
+        self.assertIn("{task} placeholder", no_placeholder)
 
     def test_timeout_yields_124(self) -> None:
         result = self._runner().run("slow task", agent="slow")

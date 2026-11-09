@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.2
+
+### Added
+
+- **A Deployment chapter in both READMEs** — what "deployment" means for a
+  plain process (no daemon, no port, no scheduler), then four steps: check the
+  install, give the plane a home, pick an execution body, hand in the first
+  card.  It also covers how to wire the plane into DSH / Claude Code / Codex,
+  who decides what gets dispatched, the full configuration reference, what the
+  plane deliberately does not do, and a troubleshooting table mapping every
+  exit code and gate reason to a fix.
+- **A deployment diagram** in English and Chinese, rendered deterministically
+  by `scripts/render_diagrams.py`: three entry points, one core, one ledger.
+- The rendered diagrams (`.png` and `.svg`) are now part of the sdist, so a
+  source install carries them too.
+
+### Fixed
+
+- **A failure before the execution body starts is now diagnosable.**  An
+  unknown agent, an empty command template, a template without the `{task}`
+  placeholder and a command that is not on `PATH` all used to end in
+  `exit_code: 127` with no run log and no stderr in the receipt — the operator
+  saw only the number.  Each case now says which one it was, writes the usual
+  log under `${FOREMAN_HOME}/runs/`, and the receipt carries the tail of
+  stderr.
+- **The MCP handshake no longer reports a stale version.**  `serverInfo.version`
+  was hard-coded to `0.1.0`; it now follows the package version.
+
 ## 0.1.1
 
 ### Changed

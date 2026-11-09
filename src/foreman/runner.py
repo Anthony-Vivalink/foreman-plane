@@ -63,6 +63,15 @@ def _as_text(value: Any) -> str:
     return str(value)
 
 
+def _tail(text: str, limit: int = 2000) -> str:
+    """Last ``limit`` characters of ``text`` — enough to diagnose, small enough
+    to carry in a receipt and in the ledger."""
+    stripped = (text or "").strip()
+    if len(stripped) <= limit:
+        return stripped
+    return "..." + stripped[-limit:]
+
+
 class Runner:
     """Runs a CLI agent as a subprocess."""
 
@@ -120,20 +129,34 @@ class Runner:
     ) -> RunResult:
         """Run one task.  Never raises: failures become exit codes."""
         agent_name = agent or self.agent
-        tokens = self.command_for(agent_name, task, workdir)
-        if tokens is None:
-            return RunResult(
-                exit_code=127,
-                stdout="",
-                stderr=f"agent not found: {agent_name}",
+        spec = self.config.agents.get(agent_name)
+        tokens: list[str] | None = None
+        problem = ""
+        if not isinstance(spec, dict) or not str(spec.get("command") or "").strip():
+            problem = (
+                f"agent not found: {agent_name} "
+                "(no such agent, or its command template is empty)"
             )
+        else:
+            tokens = self.command_for(agent_name, task, workdir)
+            if tokens is None:
+                problem = (
+                    f"agent not found: {agent_name} "
+                    "(command template has no {task} placeholder)"
+                )
+        if tokens is None:
+            result = RunResult(exit_code=127, stdout="", stderr=problem)
+            self._write_log(task_id, agent_name, result)
+            return result
         executable = tokens[0]
         if shutil.which(executable) is None:
-            return RunResult(
+            result = RunResult(
                 exit_code=127,
                 stdout="",
-                stderr=f"agent not found: {executable}",
+                stderr=f"agent not found: {executable} (executable is not on PATH)",
             )
+            self._write_log(task_id, agent_name, result)
+            return result
         timeout = self.timeout_for(agent_name, timeout_s)
         started = time.monotonic()
         try:
@@ -300,6 +323,7 @@ class Dispatcher:
             timed_out=result.timed_out,
             agent=agent_name,
             acceptance_reason=acceptance.reason,
+            stderr_tail=_tail(result.stderr, 500),
             actor=who,
         )
         return {
@@ -314,6 +338,7 @@ class Dispatcher:
             "exit_code": result.exit_code,
             "duration_s": round(result.duration_s, 3),
             "timed_out": result.timed_out,
+            "stderr": _tail(result.stderr),
             "notes": list(decision.notes),
         }
 

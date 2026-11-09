@@ -13,6 +13,7 @@ import json
 import sys
 from typing import Any, TextIO
 
+from . import __version__
 from .config import ForemanConfig, load_config
 from .errors import UnknownTaskError
 from .runner import Dispatcher
@@ -21,7 +22,7 @@ __all__ = ["ForemanMCPServer", "main", "PROTOCOL_VERSION", "TOOLS"]
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "foreman"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = __version__
 
 TOOLS: list[dict[str, Any]] = [
     {
