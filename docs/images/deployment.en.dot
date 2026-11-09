@@ -1,0 +1,41 @@
+digraph deployment {
+
+  graph [bgcolor="#FFFFFF", fontname="Noto Sans CJK SC", dpi=160, margin=0.12, nodesep=0.45, ranksep=0.55];
+  node  [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#5B4CF0",
+         penwidth=1.6, fontname="Noto Sans CJK SC", fontsize=13, fontcolor="#1F2430", margin="0.22,0.14"];
+  edge  [fontname="Noto Sans CJK SC", fontsize=11, fontcolor="#3C4A6B", color="#8E9BD6", penwidth=1.4,
+         arrowsize=0.8];
+
+  rankdir=LR;
+  labelloc="t";
+  label=<<b>deployment — three entry points, one core, one ledger</b>>;
+  fontsize=12;
+  fontcolor="#6B7A99";
+
+  subgraph cluster_deciders {
+    label="who decides what runs";
+    fontname="Noto Sans CJK SC";
+    fontsize=13;
+    fontcolor="#3C4A6B";
+    color="#C8D0F0";
+    penwidth=1.4;
+    style="rounded";
+    margin=14;
+    cli   [label="CLI\nhuman or script", fillcolor="#F4F6FB", color="#9AA6C8"];
+    mcp   [label="MCP client\nClaude Code / Codex / DSH", fillcolor="#F4F6FB", color="#9AA6C8"];
+    sched [label="external scheduler\ncron / CI", fillcolor="#F4F6FB", color="#9AA6C8"];
+  }
+
+  plane  [label="foreman-plane\n—————————————\nparse → gate → run → accept", fillcolor="#5B4CF0", fontcolor="#FFFFFF", penwidth=2.0];
+  home   [label="FOREMAN_HOME\nledger.jsonl append-only\nagents.json bodies\nruns/ run logs", fillcolor="#EEF2FF"];
+  bodies [label="execution bodies (pluggable)\nclaude -p {task}\ncodex exec {task}\ndsh headless {task}\ncustom command"];
+  arte   [label="artefact files\nmin_bytes / sha256\ncontains / exit_code", fillcolor="#FFF4E5", color="#E0A458", fontcolor="#8A5A18"];
+
+  cli   -> plane [label="hand in a card"];
+  mcp   -> plane [label="foreman_dispatch"];
+  sched -> plane [label="feeds cards on a schedule"];
+  plane -> bodies [label="run the card"];
+  bodies -> arte  [label="writes files"];
+  plane  -> arte  [label="acceptance checks", style="dashed", color="#E0A458", fontcolor="#8A5A18"];
+  plane  -> home  [label="append events"];
+}

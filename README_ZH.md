@@ -75,9 +75,100 @@ export PYTHONPATH="$PWD/src"
 export FOREMAN_HOME="$PWD/.foreman"
 ```
 
-### 接进 DSH
+装好了就照着走？下面的 **[部署](#部署)** 是逐步的：工头把状态放哪、用哪条命令执行任务卡、第一张卡怎么递、怎么接进你的 harness。
 
-工头自带 MCP 服务，不用写一行插件代码。把 profile 补丁指向这个 stdio 服务就能用：
+## 部署
+
+foreman-plane 是个普通进程，不是服务：没有守护进程、没有端口、没有数据库、没有调度器。所谓「部署」其实是做三个决定：
+
+| 决定 | 在哪 | 默认 |
+| --- | --- | --- |
+| 工头把状态放在哪 | `FOREMAN_HOME` | `$HOME/.foreman` |
+| 用哪条命令执行任务卡 | `${FOREMAN_HOME}/agents.json` | 内置的 `generic`——命令是空的，不配就跑不了 |
+| 谁能递任务卡进来 | 调用方：人、脚本或 MCP 客户端 | — |
+
+![部署：三个入口 · 一个内核 · 一本台账](https://raw.githubusercontent.com/Anthony-Vivalink/foreman-plane/main/docs/images/deployment.zh.png)
+
+### 第 0 步 —— 先确认装上了
+
+```bash
+pip install foreman-plane
+foreman --help
+foreman config
+```
+
+`foreman config` 会打印当前生效的主目录、台账路径、运行日志目录和已知的执行体。这一步还不写任何文件。
+
+### 第 1 步 —— 给工头一个家
+
+```bash
+export FOREMAN_HOME=/var/lib/foreman
+foreman config
+```
+
+工头自己的东西全在 `FOREMAN_HOME` 底下：
+
+| 路径 | 谁写 | 用途 |
+| --- | --- | --- |
+| `ledger.jsonl` | 工头 | 只追加的审计台账，唯一事实来源 |
+| `runs/` | 工头 | 每次运行一个日志文件：stdout、stderr、退出码 |
+| `agents.json` | **你** | 执行体配置 |
+
+`FOREMAN_HOME` 的解析顺序：环境变量 → `$HOME/.foreman` → `<cwd>/.foreman`；`HOME` 没设也不会崩。主目录和 `runs/` 会自动建出来，`agents.json` 只读、不会替你生成。
+
+### 第 2 步 —— 选一个执行体
+
+```bash
+cat > /var/lib/foreman/agents.json <<'JSON'
+{
+  "agents": {
+    "dsh":    {"command": "dsh headless {task}"},
+    "claude": {"command": "claude -p {task}"},
+    "codex":  {"command": "codex exec {task}"},
+    "mybot":  {"command": "mybot run --prompt {task}"}
+  }
+}
+JSON
+```
+
+有两个占位符可用：`{task}`——替换成整张任务卡；`{workdir}`——替换成工作目录。**模板里没有 `{task}` 会被拒绝**：工头不猜该把什么喂给 agent，所以这次运行在启动之前就以 `exit_code: 127` 收场。
+
+命令以子进程方式执行（不过 shell，所以没有引号坑），工作目录就是 `dispatch` 时传的那个，时长上限 `FOREMAN_TIMEOUT` 秒（默认 900）。
+
+`claude` / `codex` / `dsh` / `generic` 这四个名字内置就有，你的 `agents.json` 可以覆盖或扩展它们。`generic` 的命令是空的，所以派给它会以 `exit_code: 127` 收场——工头绝不替你猜该用哪个 agent。
+
+### 第 3 步 —— 递第一张卡
+
+每张卡都必须有 `[id]`，没有会被拒（`task_id_missing`）。
+
+```bash
+cat > /tmp/card.md <<'MD'
+[id] T-20261109-01
+[acceptance] reports/report.md::min_bytes=200::contains=Conclusion
+
+读一下笔记写个总结，最后加一节 "Conclusion"。
+MD
+
+foreman dispatch --file /tmp/card.md --agent dsh --workdir /srv/work
+```
+
+命令会把这张卡跑到结束，然后给出裁决：
+
+```text
+task_id: T-20261109-01
+ok: true
+verdict: pass
+acceptance_ok: true
+exit_code: 0
+```
+
+加 `--json` 打印完整回执。退出码：`0` 成功、`2` 被闸门拦下、`3` 产物验收不过、`1` 其它错误。
+
+### 第 4 步 —— 让编排器来驱动
+
+这才是常见部署姿势：**agent 决定「跑什么」，工头保证「什么时候跑、算不算跑成」**。agent 通过 MCP over stdio 说话——一行一个 JSON 对象，不用开端口，也不用养守护进程。
+
+**DeepSeek Harness**：不用写插件代码，把 profile 指到这个 stdio 服务即可：
 
 ```yaml
 # ~/.dsh/profiles/headless/cordis.patch.yml
@@ -92,7 +183,7 @@ mcp:
         FOREMAN_HOME: /var/lib/foreman
 ```
 
-### 接进 Claude Code、Codex 或任意 MCP 客户端
+**Claude Code、Codex 或任意 MCP 客户端**：
 
 ```json
 {
@@ -105,6 +196,52 @@ mcp:
   }
 }
 ```
+
+编排器拿到三个工具：`foreman_dispatch`、`foreman_status`、`foreman_cancel`。
+
+### 到底谁决定派发
+
+**工头自己不做任何决定。** 它没有 planner、没有模型、没有优先级队列、没有调度器；它只执行递进来的卡，并拒掉硬依赖还没满足的卡。
+
+```text
+做决定 → 写卡 → 递进来（CLI / MCP）→ 工头把关、执行、验收
+```
+
+被拦下的卡**不会自动醒过来**：上游通过之后，要由编排方（或你）再递一次这张卡。`blocked` 刻意不等于 `dispatched`，所以被拦下的卡始终可以重新派——否则任务图会死锁，上游永远解不开它。
+
+### 配置总表
+
+| 变量 | 默认 | 含义 |
+| --- | --- | --- |
+| `FOREMAN_HOME` | `$HOME/.foreman` | 工头主目录：台账、运行日志、agents.json |
+| `FOREMAN_TIMEOUT` | `900` | 执行超时秒数 |
+| `FOREMAN_AGENT` | `generic` | 默认执行体 |
+| `FOREMAN_ACTOR` | `foreman` | 台账里记录的 actor |
+
+### 工头不做什么
+
+* 没有守护进程、没有调度器、没有 cron、没有 HTTP API、没有要开的端口。
+* 不替你选 agent、模型或优先级。
+* 不替你重试被拦下的卡。
+* 不信模型对结果的自述——只信文件。
+
+### 出问题怎么查
+
+| 现象 | 什么意思 | 怎么办 |
+| --- | --- | --- |
+| 退出码 2，`dependency_pending` | 上游还没跑完 | 等上游，再递一次这张卡 |
+| 退出码 2，`dependency_unaccepted` | 上游跑了但产物没验收过 | 修上游，再递一次 |
+| 退出码 2，`dependency_unknown` | 上游那个 id 从没被派过 | 检查 id 拼写 |
+| 退出码 2，`dependency_unparsed` | `[depends_on]` 标记解析不了 | 改卡——工头拒绝猜 |
+| 退出码 2，`dependency_cycle` | 依赖图成环 | 断环 |
+| 退出码 2，`duplicate_task` | 这个 id 已经有 `dispatch` 事件了 | 换 id、加 `--force`，或 `foreman ledger replan` |
+| 退出码 2，`task_id_missing` | 卡里没有 `[id]` | 补上 |
+| 退出码 3 | 产物缺失、太小或缺标记 | 看 `runs/` 里那次运行的日志 |
+| `exit_code: 127`，`no such agent, or its command template is empty` | `agents.json` 里没这个 agent | 加上这个 agent，或用内置的 |
+| `exit_code: 127`，`command template has no {task} placeholder` | 模板漏了占位符 | 补上 `{task}` |
+| `exit_code: 127`，`executable is not on PATH` | 找不到这条命令 | 改 `agents.json` 或 `PATH` |
+
+CLI 的退出码和执行体的退出码是两回事：`退出码 2`、`退出码 3` 是 CLI 的，回执里的 `exit_code:` 是执行体的。每一次失败的运行——包括根本没跑起来的那些——都会在 `${FOREMAN_HOME}/runs/` 下留一份日志，回执里也会带上 stderr 的尾巴。
 
 ## 任务卡契约
 
@@ -211,24 +348,6 @@ foreman config
 ```
 
 退出码：`0` 成功 · `2` 被闸门拦下 · `3` 产物验收不通过 · `1` 其它错误。
-
-## 配置
-
-| 变量 | 含义 |
-| --- | --- |
-| `FOREMAN_HOME` | 工头的主目录：台账、运行日志、agents.json |
-| `FOREMAN_TIMEOUT` | 执行超时秒数，默认 900 |
-| `FOREMAN_AGENT` | 默认执行体，默认 `generic` |
-| `FOREMAN_ACTOR` | 台账里记录的 actor，默认 `foreman` |
-
-`FOREMAN_HOME` 的解析顺序：环境变量 → `$HOME/.foreman` → `<cwd>/.foreman`。
-`HOME` 没设也不会崩。
-
-执行体写在 `${FOREMAN_HOME}/agents.json` 里，一条命令一个名字：
-
-```json
-{"agents": {"mybot": {"command": "mybot run --prompt {task}"}}}
-```
 
 ## 开发
 

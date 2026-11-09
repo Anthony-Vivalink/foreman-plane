@@ -78,10 +78,119 @@ export PYTHONPATH="$PWD/src"
 export FOREMAN_HOME="$PWD/.foreman"
 ```
 
-### Wire it into DSH
+Ready to run it? **[Deployment](#deployment)** below is the step-by-step:
+where the plane keeps its state, which command executes a card, the first
+card you hand in, and how to wire it into your harness.
 
-foreman-plane ships an MCP server, so no plugin code is needed. Point the
-profile patch at the stdio server and DSH talks to the plane directly:
+## Deployment
+
+foreman-plane is a plain process, not a service. There is no daemon, no port,
+no database and no scheduler. "Deploying" it is three decisions, not a
+deployment guide:
+
+| Decision | Where | Default |
+| --- | --- | --- |
+| Where the plane keeps its state | `FOREMAN_HOME` | `$HOME/.foreman` |
+| Which command executes a card | `${FOREMAN_HOME}/agents.json` | the built-in `generic` — empty, so it fails until you define it |
+| Who may hand in cards | the caller: a person, a script or an MCP client | — |
+
+![Deployment: three entry points, one core, one ledger](https://raw.githubusercontent.com/Anthony-Vivalink/foreman-plane/main/docs/images/deployment.en.png)
+
+### Step 0 — check the install
+
+```bash
+pip install foreman-plane
+foreman --help
+foreman config
+```
+
+`foreman config` prints the effective home, the ledger path, the run directory
+and the known execution bodies. Nothing is written yet.
+
+### Step 1 — give the plane a home
+
+```bash
+export FOREMAN_HOME=/var/lib/foreman
+foreman config
+```
+
+Everything the plane owns lives under `FOREMAN_HOME`:
+
+| Path | Written by | Purpose |
+| --- | --- | --- |
+| `ledger.jsonl` | the plane | the append-only audit ledger — the source of truth |
+| `runs/` | the plane | one log file per run: stdout, stderr, exit code |
+| `agents.json` | **you** | the execution bodies |
+
+`FOREMAN_HOME` resolves as: the environment variable → `$HOME/.foreman` →
+`<cwd>/.foreman`. It works even when `HOME` is not set. The home and `runs/`
+are created automatically; `agents.json` is only read, never written for you.
+
+### Step 2 — pick an execution body
+
+```bash
+cat > /var/lib/foreman/agents.json <<'JSON'
+{
+  "agents": {
+    "dsh":    {"command": "dsh headless {task}"},
+    "claude": {"command": "claude -p {task}"},
+    "codex":  {"command": "codex exec {task}"},
+    "mybot":  {"command": "mybot run --prompt {task}"}
+  }
+}
+JSON
+```
+
+Two placeholders are available: `{task}` — replaced with the whole task card —
+and `{workdir}` — replaced with the working directory. **A template without
+`{task}` is refused**: the plane will not guess what the agent should be
+told, so the run ends with `exit_code: 127` before anything starts.
+
+The command is executed as a subprocess — no shell, so there is no quoting to
+get wrong — in the working directory you pass to `dispatch`, under a
+wall-clock limit of `FOREMAN_TIMEOUT` seconds (default 900).
+
+The names `claude`, `codex`, `dsh` and `generic` already exist; your
+`agents.json` overrides or extends them. `generic` has an empty command, so a
+card dispatched to it ends with `exit_code: 127` — the plane never guesses an
+agent for you.
+
+### Step 3 — hand in your first card
+
+Every card needs an `[id]`; a card without one is refused
+(`task_id_missing`).
+
+```bash
+cat > /tmp/card.md <<'MD'
+[id] T-20261109-01
+[acceptance] reports/report.md::min_bytes=200::contains=Conclusion
+
+Read the notes and write a summary. End it with a "Conclusion" section.
+MD
+
+foreman dispatch --file /tmp/card.md --agent dsh --workdir /srv/work
+```
+
+The command runs the card to completion and then reports the verdict:
+
+```text
+task_id: T-20261109-01
+ok: true
+verdict: pass
+acceptance_ok: true
+exit_code: 0
+```
+
+`--json` prints the whole receipt instead. Exit codes: `0` success, `2` blocked
+by the gate, `3` artefact acceptance failed, `1` anything else.
+
+### Step 4 — let an orchestrator drive it
+
+This is the usual deployment: an agent decides *what* to run, the plane
+guarantees *when* and *whether*. The agent talks MCP over stdio — one JSON
+object per line, no port, no daemon to keep alive.
+
+**DeepSeek Harness** — no plugin code, just point the profile at the server:
 
 ```yaml
 # ~/.dsh/profiles/headless/cordis.patch.yml
@@ -96,7 +205,7 @@ mcp:
         FOREMAN_HOME: /var/lib/foreman
 ```
 
-### Wire it into Claude Code, Codex or any MCP client
+**Claude Code, Codex or any MCP client**:
 
 ```json
 {
@@ -109,6 +218,62 @@ mcp:
   }
 }
 ```
+
+The orchestrator gets three tools: `foreman_dispatch`, `foreman_status`,
+`foreman_cancel`.
+
+### Who decides what gets dispatched
+
+**The plane never decides.** It has no planner, no model, no priority queue
+and no scheduler. It executes the cards it is handed and refuses the ones
+whose hard dependencies are not met yet.
+
+```text
+decides → writes a card → hands it in (CLI / MCP) → plane gates, runs, accepts
+```
+
+A blocked card is **not** woken up automatically: once the upstream passes,
+the orchestrator (or you) submits the card again. `blocked` is deliberately
+not `dispatched`, so a blocked task stays re-dispatchable — otherwise the task
+graph would deadlock and the upstream could never unblock it.
+
+### Configuration reference
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FOREMAN_HOME` | `$HOME/.foreman` | plane home: ledger, run logs, agents.json |
+| `FOREMAN_TIMEOUT` | `900` | execution timeout in seconds |
+| `FOREMAN_AGENT` | `generic` | default execution body |
+| `FOREMAN_ACTOR` | `foreman` | actor recorded in the ledger |
+
+### What foreman-plane does not do
+
+* No daemon, no scheduler, no cron, no HTTP API, no port to open.
+* It does not choose an agent, a model or a priority.
+* It does not retry a blocked card for you.
+* It does not believe the model about the outcome — only files.
+
+### Troubleshooting
+
+| Symptom | What it means | Fix |
+| --- | --- | --- |
+| exit 2, `dependency_pending` | the upstream has not finished yet | wait for it, then submit the card again |
+| exit 2, `dependency_unaccepted` | the upstream ran but its artefact failed | fix the upstream, then re-submit |
+| exit 2, `dependency_unknown` | that upstream id was never dispatched | check the id |
+| exit 2, `dependency_unparsed` | the `[depends_on]` marker could not be parsed | fix the card — the plane refuses to guess |
+| exit 2, `dependency_cycle` | the dependency graph loops | break the cycle |
+| exit 2, `duplicate_task` | that id already has a `dispatch` event | a new id, `--force`, or `foreman ledger replan` |
+| exit 2, `task_id_missing` | the card has no `[id]` | add one |
+| exit 3 | the artefact is missing, too small or missing the marker | read the run log in `runs/` |
+| `exit_code: 127`, `no such agent, or its command template is empty` | the agent name is not in `agents.json` | add the agent, or use one of the built-ins |
+| `exit_code: 127`, `command template has no {task} placeholder` | the template forgot the placeholder | add `{task}` |
+| `exit_code: 127`, `executable is not on PATH` | the command cannot be found | fix `agents.json` or `PATH` |
+
+The CLI exit code and the agent's exit code are different things: `exit 2`
+and `exit 3` are the CLI's, while `exit_code:` in the receipt is the
+execution body's. Every failed run — including the ones that never started —
+leaves a log under `${FOREMAN_HOME}/runs/`, and the receipt carries the tail
+of stderr.
 
 ## The task card
 
@@ -221,24 +386,6 @@ foreman config
 
 Exit codes: `0` success, `2` blocked by the gate, `3` artefact acceptance failed,
 `1` anything else.
-
-## Configuration
-
-| Variable | Meaning |
-| --- | --- |
-| `FOREMAN_HOME` | plane home: ledger, run logs, agents.json |
-| `FOREMAN_TIMEOUT` | execution timeout in seconds, default 900 |
-| `FOREMAN_AGENT` | default execution body, default `generic` |
-| `FOREMAN_ACTOR` | actor recorded in the ledger, default `foreman` |
-
-`FOREMAN_HOME` resolves as the environment variable, then `$HOME/.foreman`,
-then `<cwd>/.foreman`. The plane still works when `HOME` is not set.
-
-Execution bodies live in `${FOREMAN_HOME}/agents.json`, one command per name:
-
-```json
-{"agents": {"mybot": {"command": "mybot run --prompt {task}"}}}
-```
 
 ## Development
 

@@ -125,9 +125,84 @@ def pipeline(lang: str) -> str:
 """
 
 
+def deployment(lang: str) -> str:
+    if lang == "zh":
+        cli = "命令行\\n人工或脚本"
+        mcp = "MCP 客户端\\nClaude Code / Codex / DSH"
+        sched = "外部调度\\ncron / CI"
+        deciders = "谁来决定派什么"
+        plane = "工头 foreman-plane\\n—————————————\\n解析 → 闸门 → 执行 → 验收"
+        home = "FOREMAN_HOME\\nledger.jsonl 只追加台账\\nagents.json 执行体\\nruns/ 运行日志"
+        bodies = "执行体（可插拔）\\nclaude -p {task}\\ncodex exec {task}\\ndsh headless {task}\\n自定义命令"
+        arte = "产物文件\\nmin_bytes / sha256\\ncontains / exit_code"
+        e_card = "送来任务卡"
+        e_tool = "foreman_dispatch"
+        e_sched = "定时喂卡"
+        e_run = "执行这张卡"
+        e_write = "写出文件"
+        e_accept = "按产物判据验收"
+        e_ledger = "追加事件"
+        cap = "部署：三个入口 · 一个内核 · 一本台账"
+    else:
+        cli = "CLI\\nhuman or script"
+        mcp = "MCP client\\nClaude Code / Codex / DSH"
+        sched = "external scheduler\\ncron / CI"
+        deciders = "who decides what runs"
+        plane = "foreman-plane\\n—————————————\\nparse → gate → run → accept"
+        home = "FOREMAN_HOME\\nledger.jsonl append-only\\nagents.json bodies\\nruns/ run logs"
+        bodies = "execution bodies (pluggable)\\nclaude -p {task}\\ncodex exec {task}\\ndsh headless {task}\\ncustom command"
+        arte = "artefact files\\nmin_bytes / sha256\\ncontains / exit_code"
+        e_card = "hand in a card"
+        e_tool = "foreman_dispatch"
+        e_sched = "feeds cards on a schedule"
+        e_run = "run the card"
+        e_write = "writes files"
+        e_accept = "acceptance checks"
+        e_ledger = "append events"
+        cap = "deployment — three entry points, one core, one ledger"
+
+    return f"""digraph deployment {{
+{COMMON}
+  rankdir=LR;
+  labelloc="t";
+  label=<<b>{cap}</b>>;
+  fontsize=12;
+  fontcolor="#6B7A99";
+
+  subgraph cluster_deciders {{
+    label="{deciders}";
+    fontname="{FONT}";
+    fontsize=13;
+    fontcolor="#3C4A6B";
+    color="#C8D0F0";
+    penwidth=1.4;
+    style="rounded";
+    margin=14;
+    cli   [label="{cli}", fillcolor="#F4F6FB", color="#9AA6C8"];
+    mcp   [label="{mcp}", fillcolor="#F4F6FB", color="#9AA6C8"];
+    sched [label="{sched}", fillcolor="#F4F6FB", color="#9AA6C8"];
+  }}
+
+  plane  [label="{plane}", fillcolor="#5B4CF0", fontcolor="#FFFFFF", penwidth=2.0];
+  home   [label="{home}", fillcolor="#EEF2FF"];
+  bodies [label="{bodies}"];
+  arte   [label="{arte}", fillcolor="#FFF4E5", color="#E0A458", fontcolor="#8A5A18"];
+
+  cli   -> plane [label="{e_card}"];
+  mcp   -> plane [label="{e_tool}"];
+  sched -> plane [label="{e_sched}"];
+  plane -> bodies [label="{e_run}"];
+  bodies -> arte  [label="{e_write}"];
+  plane  -> arte  [label="{e_accept}", style="dashed", color="#E0A458", fontcolor="#8A5A18"];
+  plane  -> home  [label="{e_ledger}"];
+}}
+"""
+
+
 GRAPHS = {
     "architecture": architecture,
     "pipeline": pipeline,
+    "deployment": deployment,
 }
 
 
