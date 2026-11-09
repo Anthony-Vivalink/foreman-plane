@@ -102,12 +102,12 @@ jobs:
     needs: build
     if: ${{ vars.PYPI_PUBLISH == 'true' }}
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/foreman-plane/
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
+      # No `environment:` on purpose — the PyPI trusted publisher is
+      # registered without an environment name, and a mismatch between the
+      # two makes the OIDC exchange fail with a puzzling error.
       - uses: pypa/gh-action-pypi-publish@release/v1
