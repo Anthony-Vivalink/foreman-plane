@@ -1,19 +1,18 @@
-## foreman-plane v0.1.1
+## foreman-plane v0.1.2
 
 A task governance plane that runs **outside** your agent harness: dispatch, two-level dependency gates, objective acceptance, an append-only audit ledger. Zero third-party dependencies, standard library only, Python ≥ 3.10.
 
-### What changed since v0.1.0
+### What changed since v0.1.1
 
-**Task card contract**
+**Docs — the deployment chapter**
 
-- The canonical markers are now half-width brackets: `[id]`, `[depends_on]`, `[needs_api]`, `[acceptance]`.
-- `acceptance` is an ASCII alias of `验收`, recognised in the bracketed form only — English prose such as `acceptance criteria: ...` can therefore never be mistaken for a marker.
-- The full-width forms (`【id】`, `【验收】`) and the colon forms (`id:`, `验收:`) stay accepted, so cards written for 0.1.0 keep working untouched.
+- Both READMEs now carry a Deployment chapter: what "deployment" means for a plain process (no daemon, no port, no scheduler — so it is three decisions, not a deployment guide), the four steps (check the install, give the plane a home, pick an execution body, hand in the first card), how to wire the plane into DSH / Claude Code / Codex, who decides what gets dispatched, the configuration reference, what the plane deliberately does not do, and a troubleshooting table that maps every exit code and gate reason to a fix.
+- A new deployment diagram — three entry points, one core, one ledger — rendered deterministically in English and Chinese.
 
-**Docs**
+**Fixes**
 
-- `README.md` (English) and `README_ZH.md` (Chinese), each in one language, in the DSH plugin house style: language switcher, badges, a "why" table, install paths for DSH / MCP clients, the contract table, the gates and the CLI.
-- The diagrams are now rendered images — architecture and task-card pipeline, in English and Chinese — generated deterministically by `scripts/render_diagrams.py` (Graphviz). The ASCII art stays as the text fallback.
+- A failure before the execution body starts is now diagnosable. An unknown agent, an empty command template, a template without the `{task}` placeholder and a command that is not on `PATH` used to end in `exit_code: 127` with no run log and no stderr in the receipt. Each case now says which one it was, writes the usual log under `${FOREMAN_HOME}/runs/`, and the receipt carries the tail of stderr.
+- The MCP handshake no longer reports `serverInfo.version 0.1.0`; it follows the package version.
 
 ### Install
 
@@ -23,6 +22,6 @@ pip install foreman-plane
 
 ### Upgrade notes
 
-No breaking changes. Existing 0.1.0 task cards keep parsing; only the canonical spelling of the markers changed, and both spellings are accepted.
+No breaking changes. `pip install -U foreman-plane` gets you the new docs and the two fixes. The task card contract is unchanged: the same markers, the same gates, the same ledger format.
 
 Assets below are the wheel and the sdist. The sdist ships the docs, the examples and the diagram sources, so the figures can be regenerated with `python3 scripts/render_diagrams.py`.
