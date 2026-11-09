@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foreman-plane"
+version = "0.1.0"
+description = "A task governance plane that runs outside the agent harness: dispatch, dependency gates, objective acceptance, append-only ledger."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Foreman Plane contributors" }]
+keywords = ["agents", "mcp", "orchestration", "task-governance", "audit"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Build Tools",
+]
+dependencies = []
+
+[project.scripts]
+foreman = "foreman.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Anthony-Vivalink/foreman-plane"
+Source = "https://github.com/Anthony-Vivalink/foreman-plane"
+Issues = "https://github.com/Anthony-Vivalink/foreman-plane/issues"
+Changelog = "https://github.com/Anthony-Vivalink/foreman-plane/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
