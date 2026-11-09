@@ -1,0 +1,26 @@
+digraph pipeline {
+
+  graph [bgcolor="#FFFFFF", fontname="Noto Sans CJK SC", dpi=160, margin=0.12, nodesep=0.45, ranksep=0.55];
+  node  [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#5B4CF0",
+         penwidth=1.6, fontname="Noto Sans CJK SC", fontsize=13, fontcolor="#1F2430", margin="0.22,0.14"];
+  edge  [fontname="Noto Sans CJK SC", fontsize=11, fontcolor="#3C4A6B", color="#8E9BD6", penwidth=1.4,
+         arrowsize=0.8];
+
+  rankdir=TB;
+  labelloc="t";
+  label=<<b>how one task card runs</b>>;
+  fontsize=13;
+  fontcolor="#6B7A99";
+
+  card    [label="task card\nplain text", fillcolor="#F4F6FB", color="#9AA6C8"];
+  parse   [label="parse\ncontract"];
+  gate    [label="gate\nhard dependencies all\nterminal, passed, accepted?", fillcolor="#EEF2FF"];
+  blocked [label="blocked\none ledger line\nnothing runs, no dispatch", fillcolor="#FFF4E5", color="#E0A458", fontcolor="#8A5A18"];
+  run     [label="run\ncall the execution body"];
+  accept  [label="accept\ncheck the artefact"];
+  ledger  [label="ledger\nappend one JSON line", fillcolor="#EEF2FF"];
+
+  card -> parse -> gate -> run -> accept -> ledger;
+  gate -> blocked [label="no", fontcolor="#8A5A18"];
+  blocked -> ledger [label="blocked event", style="dashed", color="#E0A458", fontcolor="#8A5A18"];
+}

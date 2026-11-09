@@ -23,14 +23,18 @@ Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正�
 > **agent 忘了的承诺不算承诺。** 通过与否只认磁盘上的产物，所以判据活得比产出它的
 > 那段会话更久。
 
-┌────────────────────┐        ┌────────────────────────┐
-│ 执行体（可插拔）   │        │ 工头 foreman-plane     │
-│ Claude Code        │ ─────▶ │ 闸门 · 台账 · 产物验收 │
-│ Codex              │ ◀───── │                        │
-│ DeepSeek Harness   │        │                        │
-│ 任意 CLI agent     │        │                        │
-└────────────────────┘        └────────────────────────┘
+![执行体通过 MCP/stdio 与工头对话](https://raw.githubusercontent.com/Anthony-Vivalink/foreman-plane/main/docs/images/architecture.zh.png)
+
+```text
+┌──────────────────┐        ┌────────────────────┐
+│ 执行体（可插拔） │        │ 工头 foreman-plane │
+│ Claude Code      │ ─────▶ │ 派单               │
+│ Codex            │        │ 依赖闸门           │
+│ DeepSeek Harness │ ◀───── │ 产物验收           │
+│ 任意 CLI agent   │        │ 只追加台账         │
+└──────────────────┘        └────────────────────┘
     MCP / stdio —— JSON-RPC 2.0，一行一个 JSON 对象
+```
 
 * **跨会话** —— 台账比任何一段对话都活得久。
 * **跨实例** —— 多个 agent 共用同一张任务图。
@@ -129,6 +133,8 @@ mcp:
 ## 工头保证什么
 
 ### 一张单怎么跑
+
+![一张任务卡在工头里怎么跑](https://raw.githubusercontent.com/Anthony-Vivalink/foreman-plane/main/docs/images/pipeline.zh.png)
 
 ```text
   任务卡

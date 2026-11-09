@@ -24,14 +24,18 @@ dispatch, dependency gating, objective acceptance and an append-only ledger.
 > A promise the agent forgot is not a promise. The verdict is derived from files
 > on disk, so it outlives the session that produced it.
 
-┌────────────────────┐        ┌────────────────────────┐
-│ execution bodies   │        │ foreman-plane          │
-│ Claude Code        │ ─────▶ │ gate · ledger · acceptance│
-│ Codex              │ ◀───── │                        │
-│ DeepSeek Harness   │        │                        │
-│ any CLI agent      │        │                        │
-└────────────────────┘        └────────────────────────┘
+![Execution bodies talk to foreman-plane over MCP/stdio](https://raw.githubusercontent.com/Anthony-Vivalink/foreman-plane/main/docs/images/architecture.en.png)
+
+```text
+┌──────────────────┐        ┌──────────────────────┐
+│ execution bodies │        │ foreman-plane        │
+│ Claude Code      │ ─────▶ │ dispatch             │
+│ Codex            │        │ dependency gates     │
+│ DeepSeek Harness │ ◀───── │ objective acceptance │
+│ any CLI agent    │        │ append-only ledger   │
+└──────────────────┘        └──────────────────────┘
   MCP / stdio — JSON-RPC 2.0, one JSON object per line
+```
 
 * **Cross session** — the ledger outlives every conversation.
 * **Cross instance** — several agents share one task graph.
@@ -135,6 +139,8 @@ a dependency marker that cannot be parsed refuses the dispatch with
 ## What the plane guarantees
 
 ### How one card runs
+
+![How one task card runs through the plane](https://raw.githubusercontent.com/Anthony-Vivalink/foreman-plane/main/docs/images/pipeline.en.png)
 
 ```text
   task card

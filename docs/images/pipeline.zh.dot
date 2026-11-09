@@ -1,0 +1,26 @@
+digraph pipeline {
+
+  graph [bgcolor="#FFFFFF", fontname="Noto Sans CJK SC", dpi=160, margin=0.12, nodesep=0.45, ranksep=0.55];
+  node  [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#5B4CF0",
+         penwidth=1.6, fontname="Noto Sans CJK SC", fontsize=13, fontcolor="#1F2430", margin="0.22,0.14"];
+  edge  [fontname="Noto Sans CJK SC", fontsize=11, fontcolor="#3C4A6B", color="#8E9BD6", penwidth=1.4,
+         arrowsize=0.8];
+
+  rankdir=TB;
+  labelloc="t";
+  label=<<b>一张任务卡怎么跑</b>>;
+  fontsize=13;
+  fontcolor="#6B7A99";
+
+  card    [label="任务卡\n纯文本", fillcolor="#F4F6FB", color="#9AA6C8"];
+  parse   [label="解析\n契约"];
+  gate    [label="闸门\n硬依赖都终态、通过、已验收？", fillcolor="#EEF2FF"];
+  blocked [label="blocked\n台账记一笔\n不执行、不写 dispatch", fillcolor="#FFF4E5", color="#E0A458", fontcolor="#8A5A18"];
+  run     [label="执行\n调用执行体"];
+  accept  [label="验收\n按产物判据核"];
+  ledger  [label="台账\n追加一行 JSON", fillcolor="#EEF2FF"];
+
+  card -> parse -> gate -> run -> accept -> ledger;
+  gate -> blocked [label="no", fontcolor="#8A5A18"];
+  blocked -> ledger [label="blocked event", style="dashed", color="#E0A458", fontcolor="#8A5A18"];
+}

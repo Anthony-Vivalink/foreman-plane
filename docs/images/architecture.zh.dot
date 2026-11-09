@@ -1,0 +1,34 @@
+digraph architecture {
+
+  graph [bgcolor="#FFFFFF", fontname="Noto Sans CJK SC", dpi=160, margin=0.12, nodesep=0.45, ranksep=0.55];
+  node  [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#5B4CF0",
+         penwidth=1.6, fontname="Noto Sans CJK SC", fontsize=13, fontcolor="#1F2430", margin="0.22,0.14"];
+  edge  [fontname="Noto Sans CJK SC", fontsize=11, fontcolor="#3C4A6B", color="#8E9BD6", penwidth=1.4,
+         arrowsize=0.8];
+
+  rankdir=LR;
+  labelloc="t";
+  label=<<b>MCP / stdio — JSON-RPC 2.0</b>>;
+  fontsize=12;
+  fontcolor="#6B7A99";
+
+  subgraph cluster_bodies {
+    label="执行体（可插拔）";
+    fontname="Noto Sans CJK SC";
+    fontsize=13;
+    fontcolor="#3C4A6B";
+    color="#C8D0F0";
+    penwidth=1.4;
+    style="rounded";
+    margin=14;
+    bodies [label="Claude Code\nCodex\nDeepSeek Harness\n任意 CLI agent"];
+  }
+
+  plane [label="工头 foreman-plane\n—————————————\n派单\n依赖闸门\n产物验收\n只追加台账", fillcolor="#5B4CF0", fontcolor="#FFFFFF", penwidth=2.0];
+
+  ledger [label="台账文件\nappend-only\nJSON Lines", fillcolor="#F4F6FB", color="#9AA6C8"];
+
+  bodies -> plane [label="送来任务卡"];
+  plane -> bodies [label="执行这张卡"];
+  plane -> ledger [label="追加一行"];
+}

@@ -3,8 +3,10 @@ include README.md
 include README_ZH.md
 include CHANGELOG.md
 recursive-include docs *.md
+recursive-include docs *.dot
 recursive-include examples *.md
 recursive-include scripts *.sh
+recursive-include scripts *.py
 recursive-include tests *.py
 global-exclude __pycache__/*
 global-exclude *.py[cod]

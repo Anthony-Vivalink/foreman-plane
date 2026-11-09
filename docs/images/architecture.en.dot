@@ -1,0 +1,34 @@
+digraph architecture {
+
+  graph [bgcolor="#FFFFFF", fontname="Noto Sans CJK SC", dpi=160, margin=0.12, nodesep=0.45, ranksep=0.55];
+  node  [shape=box, style="rounded,filled", fillcolor="#FFFFFF", color="#5B4CF0",
+         penwidth=1.6, fontname="Noto Sans CJK SC", fontsize=13, fontcolor="#1F2430", margin="0.22,0.14"];
+  edge  [fontname="Noto Sans CJK SC", fontsize=11, fontcolor="#3C4A6B", color="#8E9BD6", penwidth=1.4,
+         arrowsize=0.8];
+
+  rankdir=LR;
+  labelloc="t";
+  label=<<b>MCP / stdio — JSON-RPC 2.0</b>>;
+  fontsize=12;
+  fontcolor="#6B7A99";
+
+  subgraph cluster_bodies {
+    label="execution bodies (pluggable)";
+    fontname="Noto Sans CJK SC";
+    fontsize=13;
+    fontcolor="#3C4A6B";
+    color="#C8D0F0";
+    penwidth=1.4;
+    style="rounded";
+    margin=14;
+    bodies [label="Claude Code\nCodex\nDeepSeek Harness\nany CLI agent"];
+  }
+
+  plane [label="foreman-plane\n—————————————\ndispatch\ndependency gates\nobjective acceptance\nappend-only ledger", fillcolor="#5B4CF0", fontcolor="#FFFFFF", penwidth=2.0];
+
+  ledger [label="ledger file\nappend-only\nJSON Lines", fillcolor="#F4F6FB", color="#9AA6C8"];
+
+  bodies -> plane [label="hand in a task card"];
+  plane -> bodies [label="run the card"];
+  plane -> ledger [label="append one line"];
+}
