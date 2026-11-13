@@ -103,6 +103,13 @@ it is exactly the right size.
 | Human task tracking and reporting | Beads, or a plain issue tracker |
 | A single-machine, dependency-aware, model-free task ledger for your own agents | **foreman-plane** |
 
+**Two code lines, one contract.** This package and the shell-based control
+plane it grew out of share the ledger format, the task-card contract and the
+acceptance-criteria syntax — but not the execution body. The table above says
+where the plane stops; [DIVERGENCE.md](DIVERGENCE.md) records what the two
+lines share, what stays local, and the rule for deciding when a fix has to be
+released back into the package.
+
 ## What it feels like
 
 > You: `Finish these reports first, then let the downstream job merge them.`
