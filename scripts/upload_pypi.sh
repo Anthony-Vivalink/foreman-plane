@@ -4,11 +4,11 @@
 # The token never appears in the command line, in the shell history or in
 # the chat: it lives in a 0600 file that this script shreds afterwards.
 #
-#   echo -n 'pypi-xxxxxxxx' > /root/.pypitoken && chmod 600 /root/.pypitoken
+#   echo -n 'pypi-xxxxxxxx' > $HOME/.pypitoken && chmod 600 $HOME/.pypitoken
 #   ./scripts/upload_pypi.sh [version]
 #
 # Environment overrides:
-#   PYPI_TOKEN_FILE   path of the token file (default /root/.pypitoken)
+#   PYPI_TOKEN_FILE   path of the token file (default $HOME/.pypitoken)
 #   PYPI_USERNAME     default __token__ (that is what API tokens want)
 #   KEEP_TOKEN=1      do not shred the token file afterwards
 
@@ -16,7 +16,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-TOKEN_FILE="${PYPI_TOKEN_FILE:-/root/.pypitoken}"
+TOKEN_FILE="${PYPI_TOKEN_FILE:-$HOME/.pypitoken}"
 USERNAME="${PYPI_USERNAME:-__token__}"
 VERSION="${1:-}"
 

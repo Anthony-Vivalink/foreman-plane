@@ -9,6 +9,7 @@
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-blue)
 ![Python](https://img.shields.io/badge/Python-%3E%3D3.10-blue)
 ![许可证](https://img.shields.io/badge/License-MIT-yellow.svg)
+[![CI](https://github.com/Anthony-Vivalink/foreman-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Vivalink/foreman-plane/actions/workflows/ci.yml)
 
 [English](README.md) · **简体中文**
 
@@ -16,7 +17,7 @@
 
 ## 一句话
 
-**工头是一层跑在 agent harness 之外的治理平面。** DeepSeek Harness、Claude Code、
+**工头是一层跑在 agent harness 之外的治理平面。** [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（DSH）、Claude Code、
 Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正被工头掌管的是会话管不了
 的那几件事：派单、依赖闸门、客观产物验收，以及一条只追加的审计台账。
 
@@ -306,6 +307,101 @@ mcp:
 | `exit_code: 127`，`executable is not on PATH` | 找不到这条命令 | 改 `agents.json` 或 `PATH` |
 
 CLI 的退出码和执行体的退出码是两回事：`退出码 2`、`退出码 3` 是 CLI 的，回执里的 `exit_code:` 是执行体的。每一次失败的运行——包括根本没跑起来的那些——都会在 `${FOREMAN_HOME}/runs/` 下留一份日志，回执里也会带上 stderr 的尾巴。
+
+## 真跑起来长什么样
+
+下面全是干净检出后的**真实终端输出**，不是编出来的示意。`PYTHONPATH=src` 直接从
+源码目录跑，`FOREMAN_HOME` 指向一个一次性的状态目录，执行体是一个只负责写一个
+产物的两行 shell 脚本。
+
+```bash
+$ export PYTHONPATH=src
+$ export FOREMAN_HOME=/tmp/foreman-demo/home
+$ python3 -m foreman_plane.cli dispatch --file card.md --agent demo --workdir work
+task_id: T-20261122-01
+ok: True
+verdict: pass
+acceptance_ok: True
+exit_code: 0
+
+$ python3 -m foreman_plane.cli dispatch --file card_fail.md --agent demo --workdir work
+task_id: T-20261122-02
+ok: False
+verdict: fail
+acceptance_ok: False
+exit_code: 0
+
+$ python3 -m foreman_plane.cli status
+done: 2
+
+$ python3 -m foreman_plane.cli config
+FOREMAN_HOME: /tmp/foreman-demo/home
+ledger: /tmp/foreman-demo/home/ledger.jsonl
+runs_dir: /tmp/foreman-demo/home/runs
+timeout_s: 900
+default_agent: generic
+agents: claude, codex, demo, dsh, generic
+```
+
+第二张派单请再看一遍：执行体本身跑成功了——`exit_code: 0`——但结论仍然是
+**fail**，因为产物里没有卡里要求的那段字符串。结论只认磁盘上的文件；退出码和
+agent 的自述只是另外两个输入，永远不是判据本身。
+
+台账把一张卡的三个事件——`dispatch`、`running`、`done`——写进同一个只追加的文件：
+
+```bash
+$ python3 -m foreman_plane.cli ledger show T-20261122-01
+{"ts": "2026-11-22T11:10:18.450549+00:00", "event": "dispatch", "task_id": "T-20261122-01", "actor": "foreman", "depends_on": [], "needs_api": [], "acceptance": "reports/demo_report.md::min_bytes=10::contains=verdict", "needs_api_pending": false, "agent": "demo", "workdir": "/tmp/foreman-demo/work", "force": false, "detail": {"depends_on": [], "needs_api": [], "acceptance": "reports/demo_report.md::min_bytes=10::contains=verdict", "needs_api_pending": false, "agent": "demo", "workdir": "/tmp/foreman-demo/work", "force": false}}
+{"ts": "2026-11-22T11:10:18.450644+00:00", "event": "running", "task_id": "T-20261122-01", "actor": "foreman", "agent": "demo", "detail": {"agent": "demo"}}
+{"ts": "2026-11-22T11:10:18.452546+00:00", "event": "done", "task_id": "T-20261122-01", "actor": "foreman", "verdict": "pass", "acceptance_ok": true, "exit_code": 0, "duration_s": 0.002, "timed_out": false, "agent": "demo", "acceptance_reason": null, "stderr_tail": "", "detail": {"verdict": "pass", "acceptance_ok": true, "exit_code": 0, "duration_s": 0.002, "timed_out": false, "agent": "demo", "acceptance_reason": null, "stderr_tail": ""}}
+```
+
+上面那两张卡，以及背后那个执行体：
+
+```text
+# card.md
+[id] T-20261122-01
+[acceptance] reports/demo_report.md::min_bytes=10::contains=verdict
+
+Write the demo report into reports/demo_report.md.
+```
+
+```text
+# card_fail.md
+[id] T-20261122-02
+[acceptance] reports/demo_report.md::contains=not-in-the-file
+
+The artefact exists, but it does not contain what the card asked for.
+```
+
+```json
+{
+  "agents": {
+    "demo": {
+      "command": "/bin/sh -c \"mkdir -p reports && printf 'verdict: green\\n结论: 通过\\n' > reports/demo_report.md && echo 'wrote reports/demo_report.md'\" {task}",
+      "description": "demo body that writes an artefact"
+    }
+  }
+}
+```
+
+测试也是同一条命令跑——下面是一次 verbose 运行的**末尾几行**（每行一个用例，
+一共 78 个）：
+
+```bash
+$ PYTHONPATH=src python3 -m unittest discover -s tests -v
+test_timeout_yields_124 (test_runner.RunnerTests) ... ok
+test_unknown_agent_yields_127 (test_runner.RunnerTests) ... ok
+test_workdir_placeholder (test_runner.RunnerTests) ... ok
+
+----------------------------------------------------------------------
+Ran 78 tests in 2.180s
+
+OK
+```
+
+测试用的是 `unittest` 而不是 `pytest`，这是刻意的：这个包零第三方依赖，而且测试
+不许依赖你机器上到底装没装 `claude`、`codex` 或 `dsh`。
 
 ## 任务卡契约
 

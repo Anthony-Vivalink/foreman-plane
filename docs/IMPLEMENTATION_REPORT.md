@@ -76,7 +76,7 @@ foreman-plane/
 命令（规格 §12 第 2 条指定）：
 
 ```bash
-cd /root/Documents/deepseek-harness/default-workspace/foreman-plane
+cd <repo>   # the clone of this repository
 python3 -m unittest discover -s tests -v
 ```
 

@@ -9,6 +9,7 @@
 ![Protocol](https://img.shields.io/badge/Protocol-MCP-blue)
 ![Python](https://img.shields.io/badge/Python-%3E%3D3.10-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+[![CI](https://github.com/Anthony-Vivalink/foreman-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony-Vivalink/foreman-plane/actions/workflows/ci.yml)
 
 **English** · [简体中文](README_ZH.md)
 
@@ -17,7 +18,8 @@
 ## One sentence
 
 **foreman-plane is a governance plane that runs outside the agent harness.**
-DeepSeek Harness, Claude Code, Codex and any CLI agent are interchangeable
+[DeepSeek Harness](https://github.com/deepseek-ai/dsh) (DSH), Claude Code,
+Codex and any CLI agent are interchangeable
 execution bodies. What the plane owns is the part a session cannot own:
 dispatch, dependency gating, objective acceptance and an append-only ledger.
 
@@ -348,6 +350,105 @@ and `exit 3` are the CLI's, while `exit_code:` in the receipt is the
 execution body's. Every failed run — including the ones that never started —
 leaves a log under `${FOREMAN_HOME}/runs/`, and the receipt carries the tail
 of stderr.
+
+## What it actually looks like when it runs
+
+Everything below is real terminal output from a clean checkout — nothing here
+is a mock-up. `PYTHONPATH=src` runs the plane straight from the clone,
+`FOREMAN_HOME` points at a throw-away state directory, and the execution body
+is a two-line shell script that writes one artefact.
+
+```bash
+$ export PYTHONPATH=src
+$ export FOREMAN_HOME=/tmp/foreman-demo/home
+$ python3 -m foreman_plane.cli dispatch --file card.md --agent demo --workdir work
+task_id: T-20261122-01
+ok: True
+verdict: pass
+acceptance_ok: True
+exit_code: 0
+
+$ python3 -m foreman_plane.cli dispatch --file card_fail.md --agent demo --workdir work
+task_id: T-20261122-02
+ok: False
+verdict: fail
+acceptance_ok: False
+exit_code: 0
+
+$ python3 -m foreman_plane.cli status
+done: 2
+
+$ python3 -m foreman_plane.cli config
+FOREMAN_HOME: /tmp/foreman-demo/home
+ledger: /tmp/foreman-demo/home/ledger.jsonl
+runs_dir: /tmp/foreman-demo/home/runs
+timeout_s: 900
+default_agent: generic
+agents: claude, codex, demo, dsh, generic
+```
+
+Read the second dispatch once more. The body ran fine — `exit_code: 0` — and
+the verdict is still **fail**, because the artefact did not contain the string
+the card demanded. The verdict comes from the file on disk; the exit code and
+the agent's own opinion are two more inputs, never the decision.
+
+The ledger keeps all three events of a card — `dispatch`, `running`, `done` —
+in one append-only file:
+
+```bash
+$ python3 -m foreman_plane.cli ledger show T-20261122-01
+{"ts": "2026-11-22T11:10:18.450549+00:00", "event": "dispatch", "task_id": "T-20261122-01", "actor": "foreman", "depends_on": [], "needs_api": [], "acceptance": "reports/demo_report.md::min_bytes=10::contains=verdict", "needs_api_pending": false, "agent": "demo", "workdir": "/tmp/foreman-demo/work", "force": false, "detail": {"depends_on": [], "needs_api": [], "acceptance": "reports/demo_report.md::min_bytes=10::contains=verdict", "needs_api_pending": false, "agent": "demo", "workdir": "/tmp/foreman-demo/work", "force": false}}
+{"ts": "2026-11-22T11:10:18.450644+00:00", "event": "running", "task_id": "T-20261122-01", "actor": "foreman", "agent": "demo", "detail": {"agent": "demo"}}
+{"ts": "2026-11-22T11:10:18.452546+00:00", "event": "done", "task_id": "T-20261122-01", "actor": "foreman", "verdict": "pass", "acceptance_ok": true, "exit_code": 0, "duration_s": 0.002, "timed_out": false, "agent": "demo", "acceptance_reason": null, "stderr_tail": "", "detail": {"verdict": "pass", "acceptance_ok": true, "exit_code": 0, "duration_s": 0.002, "timed_out": false, "agent": "demo", "acceptance_reason": null, "stderr_tail": ""}}
+```
+
+Those two cards and the execution body behind that output:
+
+```text
+# card.md
+[id] T-20261122-01
+[acceptance] reports/demo_report.md::min_bytes=10::contains=verdict
+
+Write the demo report into reports/demo_report.md.
+```
+
+```text
+# card_fail.md
+[id] T-20261122-02
+[acceptance] reports/demo_report.md::contains=not-in-the-file
+
+The artefact exists, but it does not contain what the card asked for.
+```
+
+```json
+{
+  "agents": {
+    "demo": {
+      "command": "/bin/sh -c \"mkdir -p reports && printf 'verdict: green\\n结论: 通过\\n' > reports/demo_report.md && echo 'wrote reports/demo_report.md'\" {task}",
+      "description": "demo body that writes an artefact"
+    }
+  }
+}
+```
+
+The test suite runs the same way — these are the last lines of a verbose run
+(one line per test case, 78 in total):
+
+```bash
+$ PYTHONPATH=src python3 -m unittest discover -s tests -v
+test_timeout_yields_124 (test_runner.RunnerTests) ... ok
+test_unknown_agent_yields_127 (test_runner.RunnerTests) ... ok
+test_workdir_placeholder (test_runner.RunnerTests) ... ok
+
+----------------------------------------------------------------------
+Ran 78 tests in 2.180s
+
+OK
+```
+
+The suite is `unittest`, not `pytest`, on purpose: the package ships zero
+third-party dependencies, and the tests must not depend on whether `claude`,
+`codex` or `dsh` is installed on your machine.
 
 ## The task card
 

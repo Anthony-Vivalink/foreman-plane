@@ -1,12 +1,12 @@
 # foreman-plane v0.1.0 — 实现规格（唯一权威）
 
-> 工头（Foreman）：部署在 agent harness **之外**的任务治理平面。DSH / Claude Code / Codex / 任意 CLI agent 都是它的接入端。
+> 工头（Foreman）：部署在 agent harness **之外**的任务治理平面。DSH（[DeepSeek Harness](https://github.com/deepseek-ai/dsh)）/ Claude Code / Codex / 任意 CLI agent 都是它的接入端。
 > 本文件是实现的唯一权威来源。**不要发明本文件没写的功能**；有歧义时按本文件的「默认取向」段落选。
 
 ## 0. 铁律（违反即验收失败）
 
 1. **零第三方依赖**。只用 Python 3.10 标准库。测试用 `unittest`（不用 pytest），MCP 用手写 JSON-RPC（不用 mcp SDK）。
-2. **纯标准库、零宿主耦合**：代码里不得出现任何绝对路径常量、不得 import 任何宿主模块、不得读 `/root/...`。所有路径来自配置。
+2. **纯标准库、零宿主耦合**：代码里不得出现任何绝对路径常量、不得 import 任何宿主模块、不得读宿主上的绝对路径。所有路径来自配置。
 3. **闸门失败必须是硬失败**：依赖不满足时**绝不执行任务**、绝不留 dispatch 记录。
 4. **不得静默降级**：解析不出合法依赖 token 时，必须显式标记 `depends_on_unparsed` / `needs_api_unparsed`，不许当成"没有依赖"。
 5. **append-only**：台账只追加，不改写、不删除历史事件。
