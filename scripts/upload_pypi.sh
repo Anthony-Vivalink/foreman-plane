@@ -16,6 +16,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+dispose_token() {
+  # shred the token file unless KEEP_TOKEN=1 says to keep it
+  if [[ "${KEEP_TOKEN:-0}" == "1" ]]; then
+    echo "upload ok — token file kept at ${TOKEN_FILE}"
+  else
+    echo "upload ok — shredding ${TOKEN_FILE}"
+    shred -u "${TOKEN_FILE}" 2>/dev/null || rm -f "${TOKEN_FILE}"
+  fi
+}
+
 TOKEN_FILE="${PYPI_TOKEN_FILE:-$HOME/.pypitoken}"
 USERNAME="${PYPI_USERNAME:-__token__}"
 VERSION="${1:-}"
@@ -48,7 +58,7 @@ echo "uploading: ${FILES[*]}"
 if [[ -n "$VERSION" ]]; then
   if curl -fsS "https://pypi.org/pypi/foreman-plane/$VERSION/json" >/dev/null 2>&1; then
     echo "foreman-plane $VERSION is already on PyPI — nothing to do"
-    [[ "${KEEP_TOKEN:-0}" == "1" ]] || shred -u "$TOKEN_FILE" 2>/dev/null || rm -f "$TOKEN_FILE"
+    dispose_token
     exit 0
   fi
 fi
@@ -60,8 +70,7 @@ rc=$?
 set -e
 
 if [[ $rc -eq 0 ]]; then
-  echo "upload ok — shredding $TOKEN_FILE"
-  [[ "${KEEP_TOKEN:-0}" == "1" ]] || shred -u "$TOKEN_FILE" 2>/dev/null || rm -f "$TOKEN_FILE"
+  dispose_token
 else
   echo "upload FAILED (rc=$rc) — token file left in place: $TOKEN_FILE" >&2
 fi
