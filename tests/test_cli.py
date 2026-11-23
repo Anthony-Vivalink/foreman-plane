@@ -130,7 +130,12 @@ class CliTests(unittest.TestCase):
             for line in (self.home / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        self.assertEqual([event["event"] for event in events], ["dispatch", "running", "done"])
+        # v0.3.0 (batch B): the `attempt` event opens the attempt and is
+        # written before the dispatch — the 0.2.x events are unchanged.
+        self.assertEqual(
+            [event["event"] for event in events],
+            ["attempt", "dispatch", "running", "done"],
+        )
 
     def test_acceptance_failure_exits_with_3(self) -> None:
         card = self.home / "card.md"

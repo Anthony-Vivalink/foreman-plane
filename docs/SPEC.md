@@ -1,4 +1,4 @@
-# foreman-plane v0.1.0 — 实现规格（唯一权威）
+# foreman-plane v0.3.0 — 实现规格（唯一权威）
 
 > 工头（Foreman）：部署在 agent harness **之外**的任务治理平面。DSH（[DeepSeek Harness](https://github.com/deepseek-ai/dsh)）/ Claude Code / Codex / 任意 CLI agent 都是它的接入端。
 > 本文件是实现的唯一权威来源。**不要发明本文件没写的功能**；有歧义时按本文件的「默认取向」段落选。
@@ -29,9 +29,10 @@ foreman-plane/
 ├── examples/
 │   └── task_card.md          # 完整任务卡示例（含四个标记 + 验收判据）
 ├── scripts/
-│   └── publish.sh            # 构建 + 校验（不内含任何 token；凭据走环境变量）
+│   ├── publish.sh            # 构建 + 校验（不内含任何 token；凭据走环境变量）
+│   └── failure_drill.sh      # v0.3.0 故障演练（真 kill -9、真重派、真续跑）
 ├── src/foreman_plane/
-│   ├── __init__.py           # __version__ = "0.1.0"
+│   ├── __init__.py           # __version__ = "0.3.0"
 │   ├── config.py             # FOREMAN_HOME 解析、agents.json 载入、默认值
 │   ├── contract.py           # 任务卡契约解析（四个标记 + 严格清洗 + unparsed 检测）
 │   ├── ledger.py             # append-only JSONL 台账 + 状态折叠 + 裁决事件
@@ -48,7 +49,8 @@ foreman-plane/
     ├── test_acceptance.py
     ├── test_runner.py
     ├── test_mcp_server.py
-    └── test_cli.py
+    ├── test_cli.py
+    └── test_recovery.py       # v0.3.0 租约/回收/checkpoint/重试
 ```
 
 ## 2. 任务卡契约（contract.py）
@@ -125,6 +127,11 @@ class TaskCard:
 | `done` | 执行体结束 | `verdict`（`pass`/`fail`）、`acceptance_ok`（bool/null）、`exit_code` |
 | `cancelled` | 人工取消 | `reason` |
 | `replan` | 人工重规划 | `reason`、`new_task_id`（可选） |
+| `heartbeat` | v0.3.0 续租（执行体还活着） | `lease_expires_at`、`lease_s` |
+| `stale` | v0.3.0 回收：租约已过期，任务变陈旧 | `reason`、`lease_expires_at`、`previous_status` |
+| `checkpoint` | v0.3.0 某一步做完了 | `step`、`artifact`（可选） |
+| `retry` | v0.3.0 一次可重试的失败 | `attempt`、`delay_s`、`exit_code`、`max_attempts` |
+| `attempt` | v0.3.0 开启一次新尝试（幂等键 = `(task_id, attempt_id)`，语义 at-least-once，**不承诺 exactly-once**） | `attempt_id`、`epoch`、`reason`、`previous_attempt_id`、`attempt_dir`、`lease_expires_at`、`lease_s` |
 
 **顺序铁律**：`blocked` 事件在闸门判定后立即写；**闸门 BLOCK 时绝不能有 `dispatch` 事件**（无幽灵派单）。
 
@@ -133,17 +140,35 @@ class TaskCard:
 按 `task_id` 顺序折叠事件得到当前状态：
 
 - 终态：`done`（verdict pass/fail）、`cancelled`
-- 非终态：`dispatched`（有 dispatch 无 running）、`running`、`blocked`
+- 非终态：`dispatched`（有 dispatch 无 running）、`running`、`blocked`、`stale`（v0.3.0：租约已过期，可再派）
 - `done` 的 verdict 由最后一个 `done` 事件的 `verdict` 决定；**没有 `done` 的任务不算 pass**。
 - 同一 task_id 多次 `done` → 取最后一次（允许重规划后重跑）。
 
 **依赖满足判定**：上游 task_id 的当前状态是终态 `done` 且其 `verdict == "pass"` 且 `acceptance_ok is not False` → 满足。
 
-### 3.4 幂等与去重
+**v0.3.0 追加的折叠字段**（老字段一个都没删、没改语义）：
+`lease_expires_at`、`lease_s`、`last_heartbeat_at`、`completed_steps`（步骤名数组）、
+`completed_steps_count`、`checkpoint_count`、`artifacts`、`recoveries`（stale 次数）、
+`retries`、`last_attempt`、`first_ts`、`stale_reason`。
+`status` 时间相关的两个字段（`lease_remaining_s`、`age_s`）由 `status` 命令在读的时候算，不进台账。
 
-- `dispatch` 前检查：该 task_id 是否已有 **`dispatch` 事件** → 拒绝重复派单，reason=`duplicate_task`，**不写 dispatch**。
-- **`blocked` 不计入重复判定**：被闸门拦下的任务**从未进入平面**，必须在其依赖满足后可再次派单（否则上游任务永远无法解锁它，任务图死锁）。
+### 3.4 幂等与去重（v0.3.0 起按**当前状态**判定，不再按历史）
+
+| 当前状态 | 能否再派 | reason |
+|---|---|---|
+| `blocked` | **能** | —— |
+| `stale`（租约已过期） | **能** | —— |
+| `running` / `dispatched`，租约未过期 | 不能 | `duplicate_task` |
+| `running` / `dispatched`，租约已过期 | **能**（视为 worker 已死） | —— |
+| `done` / `cancelled` | 不能 | `duplicate_task` |
+
+- 判定依据是折叠后的**当前状态**，不是「有没有 `dispatch` 事件」。老口径会让被 `kill -9`
+  打断的任务永远卡在 `running`，只能人肉 `--force` 整卡重跑（已完成的步骤会重复执行）。
+- **`blocked` 不计入重复判定**（0.1.0 起的规矩，不能破）：被闸门拦下的任务**从未进入平面**，
+  必须在其依赖满足后可再次派单（否则上游任务永远无法解锁它，任务图死锁）。
 - 允许 `--force` 覆盖（CLI 有，API 也留参数）。
+- 租约过期却没有先 `reclaim` 就直接再派时，先补一条 `stale` 事件再写 `dispatch`，
+  让台账能说清楚「为什么它跑了第二遍」。
 
 ### 3.5 查询 API
 
@@ -156,7 +181,13 @@ class Ledger:
     def is_dependency_satisfied(self, dep_id: str) -> bool
     def cancel(self, task_id: str, reason: str = "") -> dict
     def replan(self, task_id: str, reason: str = "", new_task_id: str | None = None) -> dict
+    def completed_steps(self, task_id: str) -> list[str]      # v0.3.0
+    def is_already_dispatched(self, task_id: str, now: datetime | None = None) -> bool  # v0.3.0
 ```
+
+模块级时间工具（v0.3.0）：`utcnow()`、`iso(dt)`、`parse_timestamp(text)`、
+`lease_remaining_s(state, now)`、`lease_expired(state, now)`、`task_age_s(state, now)`、
+`annotate_state(state, now)`。
 `cancel`/`replan` 对**台账里不存在的 task_id** → 抛 `UnknownTaskError`，**不追加任何事件**（防幽灵任务）。
 
 ## 4. 闸门（gate.py）
@@ -229,7 +260,14 @@ class RunResult:
 | `dsh` | `dsh headless <task>` |
 | `generic` | 由 `agents.json` 里 `generic.command` 模板决定，如 `"myagent --task {task}"` |
 
-- 模板占位符：`{task}`（必填）、`{workdir}`（可选）。
+- 模板占位符：`{task}`（必填）、`{workdir}`（可选）、`{completed_steps}`（v0.3.0，可选）。
+  `{completed_steps}` 会被替换成该任务已 checkpoint 的步骤名 JSON 数组（紧凑写法，如
+  `["a","b"]`；没有 checkpoint 时是 `[]`）。**模板里不写它就照旧工作**。
+- v0.3.0 退避重试（**默认关闭**，0.2.x 行为不变）：`agents.json` 的执行体里可写
+  `"retry": {"max_attempts": 3, "base_delay_s": 5, "retry_on_exit_codes": [124]}`。
+  `max_attempts` 是**总次数**（含第一次）：`1` = 不重试。第 n 次重试前等待
+  `base_delay_s * 2 ** (n - 1)`。每次重试写一条 `retry` 事件并续一次租约，
+  **绝不写第二条 `dispatch` 事件**（幂等），依赖图里同一个任务也只算一次。
 - 命令不存在 → `RunResult(exit_code=127, stderr="agent not found: <cmd>")`，**不抛异常**。
 - 超时：默认 900 秒（`FOREMAN_TIMEOUT` 可覆盖），超时 → `timed_out=True`，exit_code=124。
 - `agents.json`（`${FOREMAN_HOME}/agents.json`，**可选**，不存在则用内置默认）：
@@ -243,7 +281,7 @@ class RunResult:
 **协议**：JSON-RPC 2.0，**NDJSON 帧**（一行一个 JSON 对象，stdin/stdout），stderr 写日志（**stdout 只能有 JSON**）。
 
 必须支持的方法：
-- `initialize` → `{"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "foreman", "version": "0.1.0"}}`
+- `initialize` → `{"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "foreman", "version": "0.3.0"}}`
 - `notifications/initialized` → 不回复（notification 无 id）
 - `tools/list` → 三个工具（见下）
 - `tools/call` → 执行工具，返回 `{"content": [{"type": "text", "text": "<json>"}], "isError": bool}`
@@ -262,6 +300,9 @@ class RunResult:
 命令（`python -m foreman_plane.cli` 或控制台脚本 `foreman-plane`（别名 `gongtou`））：
 - `foreman-plane dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]`
 - `foreman-plane status [--task-id ID] [--json]`
+- `foreman-plane heartbeat TASK_ID`（v0.3.0：续租；任务不在 running/dispatched 则拒绝）
+- `foreman-plane checkpoint TASK_ID --step NAME [--artifact PATH]`（v0.3.0：记一步做完了）
+- `foreman-plane reclaim [--task-id ID] [--dry-run] [--now ISO8601]`（v0.3.0：把租约过期的任务标成 `stale`）
 - `foreman-plane ledger list|show|ready|blocked|cancel|replan`（子命令形式）
 - `foreman-plane verify --acceptance "<验收串>"`
 - `foreman-plane mcp`（启动 MCP stdio 服务）
@@ -281,6 +322,8 @@ class ForemanConfig:
     timeout_s: int
 ```
 - `FOREMAN_HOME` 解析见 §3.1；`FOREMAN_TIMEOUT` 覆盖超时；`FOREMAN_AGENT` 覆盖默认 agent。
+- v0.3.0 租约：`ForemanConfig.lease_s`（默认 900 秒）。取值顺序：`FOREMAN_LEASE` 环境变量 >
+  `agents.json` 顶层的 `"lease_s"` > 默认值。
 - **HOME 未设置时不得抛异常**（容器化的 CI 环境常见这种情况）。
 
 ## 10. 测试（tests/，stdlib unittest）
@@ -296,6 +339,9 @@ class ForemanConfig:
 | test_runner.py | 用**假的适配器**（写一个临时脚本）验证：exit_code 透传、stdout 捕获、命令不存在→127、超时→124 |
 | test_mcp_server.py | 起一个 MCP server 子进程（`sys.executable -m foreman_plane.mcp_server`），用 NDJSON 喂 initialize/tools/list/tools/call；**关键用例**：dispatch 一个 depends_on 不存在的任务 → 返回 blocked、isError 或 ok=false、且台账里只有 `blocked` 没有 `dispatch` |
 | test_cli.py | `foreman-plane status --json` 可解析；`dispatch` 阻塞时退出码为 2 |
+| test_recovery.py | v0.3.0：租约随派单落账；心跳续租且不改状态；`reclaim` 标 stale、`--dry-run` 不写；blocked 仍可重派；running 租约未过期被拒；stale 可重派；`{completed_steps}` 注入且旧模板照旧；重试只写 `retry` 不写第二条 `dispatch`；status 新字段；未知事件 kind 不炸 |
+| test_attempts.py | v0.3.0：派单分配 attempt；第二次派单开新 attempt；两次 attempt 产物不混；三态推断；老台账不被误读、报 unknown 且不判失败；retry 开新 attempt、不是 reclaim、租约有效时拒绝；验收记路径 + sha256；上次 attempt 的陈旧产物不被采纳；取消后的迟到回执被忽略；同秒两次执行日志都在 |
+| test_contract_fixtures.py | v0.3.0：fixture 齐全；公开实现与本机 shell 实现都符合契约且彼此一致；fixture 不含本机路径；契约检查脚本通过；崩溃恢复（死 worker → interrupted attempt、恢复带上已完成步骤）；JSONL 读取回归（半行、非 JSON、未知 kind、截断文件、文件不存在） |
 
 - 测试用 `tempfile.TemporaryDirectory()` 作 FOREMAN_HOME，**不得污染真实 HOME**。
 - 测试不得依赖网络、不得依赖 claude/codex/dsh 是否安装。
@@ -308,7 +354,7 @@ class ForemanConfig:
   - 与其它方案的差异（**不要点名任何现有项目**，用能力差异描述）
   - 中文版不是机翻，允许重写但信息必须等价
 - `docs/PROTOCOL.md`：任务卡契约、事件模型、MCP 工具签名、验收判据语法
-- `pyproject.toml`：`name="foreman-plane"`, `version="0.2.1"`, `license="MIT"`, `requires-python=">=3.10"`, `dependencies=[]`,
+- `pyproject.toml`：`name="foreman-plane"`, `version="0.3.0"`, `license="MIT"`, `requires-python=">=3.10"`, `dependencies=[]`,
   `[project.scripts] foreman-plane = "foreman_plane.cli:main"`（别名 `gongtou`）, `[tool.setuptools] package-dir = {"" = "src"}`
 - `scripts/publish.sh`：`set -euo pipefail`；构建 wheel/sdist（`python -m build` 若不可用则退化为 `pip wheel`）；**必须先跑测试再构建**；上传用 `TWINE_USERNAME/TWINE_PASSWORD` 环境变量，脚本里不得出现任何凭据字面量。
 - `CHANGELOG.md`：`## 0.1.0` 首次发布条目。
@@ -329,3 +375,56 @@ class ForemanConfig:
 - 拿不准要不要写事件 → **写**（append-only，宁可多留痕）。
 - 拿不准异常怎么处理 → 转成结构化 `reason` 码返回，**不要抛栈给调用方**（CLI 层才 exit code）。
 - 拿不准要不要写 Windows 兼容 → 写（`pathlib` + `os.path`，别硬编码 `/`）。
+
+## 14. 故障恢复（v0.3.0）
+
+**要解决的真实缺口**：worker 被 `kill -9` 之后，台账最后一条事件停在 `running`；
+老口径的 `is_already_dispatched()` 只看「有没有 `dispatch` 事件」，于是重新派单被判
+`duplicate_task` 拒掉。没有租约、没有心跳、没有 stale 回收、没有重试退避、没有步骤级
+checkpoint —— 任务永久卡死，只能人肉 `--force` 绕过，而 `--force` 是整卡重跑，已完成的步骤
+会重复执行。
+
+**机制**：
+
+1. **租约与心跳**：派单成功即在台账记 `lease_expires_at` / `lease_s`（默认 900 秒，
+   可配）。执行体可用 `foreman-plane heartbeat <id>` 续租（写 `heartbeat` 事件，不改状态）。
+2. **回收**：`foreman-plane reclaim` 把「租约已过期且仍在 running/dispatched」的任务写成
+   `stale` 事件；`--dry-run` 只报告；`--now ISO8601` 可以把时间往前拨（演练用）。
+   0.2.x 写的台账没有租约字段，这类任务**不自动回收**（记 `no_lease`），避免误杀。
+3. **步骤 checkpoint**：`foreman-plane checkpoint <id> --step NAME` 写 `checkpoint` 事件；
+   再派单时通过可选占位符 `{completed_steps}` 把已完成的步骤交给执行体，回执里回写
+   `completed_steps` / `skipped_steps` / `resumed`。
+4. **退避重试**：默认 0 次（0.2.x 行为不变）；`agents.json` 里配 `retry` 块开启。
+   每次重试写 `retry` 事件，**不写第二条 `dispatch`**。
+5. **可观测**：`status` 为每个任务追加 `lease_expires_at` / `lease_remaining_s` / `age_s` /
+   `completed_steps_count` / `recoveries` / `retries`；老字段一个都没删、没改语义。
+6. **attempt 维度**：每次派单分配一个 attempt —— `attempt_id` = `{task_id}-aNN`（`a` + 两位序号）、
+   `epoch` 从 1 递增、产物目录 `<workdir>/attempts/<attempt_id>/`。台账新增 `attempt` 事件，
+   同一任务的两次 attempt 产物不混。`foreman-plane attempts <id>` 列出全部 attempt 与推导出的
+   `attempt_state`：`still_running`（仍在运行）/ `interrupted`（已中断）/ `outcome_unknown`
+   （结束未知）/ `finished` / `not_started`。
+7. **显式重试**：`foreman-plane retry <id>` 是**主动**动作 —— 开一个新 attempt、重跑执行体、
+   验收**本次** attempt 的产物（`reclaim` 只是**被动**标 stale，不执行任何东西）。当前 attempt
+   仍持有效租约时拒绝（`--force` 可覆盖），`--dry-run` 只报告。
+8. **验收只认本次产物**：相对产物路径**先在 attempt 目录里找**、找不到才回落 base 目录（老卡 /
+   老模板照旧工作）；回执落 `acceptance_path` / `acceptance_sha256` / `acceptance_size` /
+   `acceptance_checks`。取消后迟到、或被更新 attempt 取代的回执**不算**当前 attempt 的成功
+   （`superseded` + `superseded_reason`，折叠时记为 `late_receipt`）。
+9. **语义铁律**：**at-least-once + 幂等键 `(task_id, attempt_id)`，不承诺 exactly-once**。
+   跨 attempt 的重复副作用由执行体自己保证幂等（只写进 attempt 目录是最省事的做法）。
+
+**向后兼容铁律**：台账事件格式、任务卡契约标记、MCP 工具名（`foreman_dispatch` /
+`foreman_status` / `foreman_cancel`）、`FOREMAN_HOME` 布局、验收判据键集
+（`min_bytes` / `sha256` / `contains` / `exit_code`）全部不变。新增的只有**可选**标记
+（`{completed_steps}` 占位符、`lease_s` 配置、`retry` 块）和**新事件 kind**
+（`heartbeat` / `stale` / `checkpoint` / `retry`）。老代码读到新事件必须安全忽略
+（折叠里没有匹配的 `elif` 分支就跳过）。
+
+**演练**：`scripts/failure_drill.sh` —— 一条命令跑完「派单 → 中途 `kill -9` → 台账停在
+running → 再派被拒 → 租约过期 → reclaim 标 stale → 再派成功且只跑剩余步骤」，
+带自检（做完的步骤只能执行一次），不联网、只用 `/tmp`、结束清理临时目录。
+真实输出见 `docs/failure_drill_sample_output.txt`。
+
+第二个演练 `scripts/artifact_gate_drill.sh` 跑「A 写产物 → 写 done 前被 `kill -9` → B 被闸门
+拒绝 → 租约过期 → reclaim 标 stale → 显式重试开新 attempt → 只验收第二次的产物 → B 才跑」，
+真实输出见 `docs/artifact_gate_drill_sample_output.txt`。

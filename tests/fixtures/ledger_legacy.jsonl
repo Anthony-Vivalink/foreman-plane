@@ -1,0 +1,5 @@
+{"ts": "2026-11-20T08:00:00+00:00", "event": "dispatch", "task_id": "T-20261123-50", "actor": "foreman", "agent": "old", "depends_on": [], "needs_api": [], "detail": {"agent": "old", "depends_on": [], "needs_api": []}}
+{"ts": "2026-11-20T08:00:01+00:00", "event": "running", "task_id": "T-20261123-50", "actor": "foreman", "agent": "old", "detail": {"agent": "old"}}
+{"ts": "2026-11-20T08:00:02+00:00", "event": "done", "task_id": "T-20261123-50", "actor": "foreman", "verdict": "pass", "acceptance_ok": true, "exit_code": 0, "agent": "old", "detail": {"verdict": "pass", "acceptance_ok": true, "exit_code": 0, "agent": "old"}}
+{"ts": "2026-11-20T09:00:00+00:00", "event": "dispatch", "task_id": "T-20261123-51", "actor": "foreman", "agent": "old", "depends_on": [], "needs_api": [], "detail": {"agent": "old", "depends_on": [], "needs_api": []}}
+{"ts": "2026-11-20T09:00:01+00:00", "event": "running", "task_id": "T-20261123-51", "actor": "foreman", "agent": "old", "detail": {"agent": "old"}}

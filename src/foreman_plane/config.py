@@ -15,15 +15,20 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, MutableMapping
+from typing import Any, Mapping, MutableMapping
 
 DEFAULT_TIMEOUT_S = 900
 DEFAULT_AGENT = "generic"
+
+#: v0.3.0 — how long a dispatched task holds the plane before its lease
+#: expires and the task may be reclaimed.
+DEFAULT_LEASE_S = 900
 
 ENV_HOME = "FOREMAN_HOME"
 ENV_TIMEOUT = "FOREMAN_TIMEOUT"
 ENV_AGENT = "FOREMAN_AGENT"
 ENV_ACTOR = "FOREMAN_ACTOR"
+ENV_LEASE = "FOREMAN_LEASE"
 
 AGENTS_FILE = "agents.json"
 LEDGER_FILE = "ledger.jsonl"
@@ -48,6 +53,9 @@ class ForemanConfig:
     runs_dir: Path
     agents: dict[str, dict] = field(default_factory=dict)
     timeout_s: int = DEFAULT_TIMEOUT_S
+    #: v0.3.0 — lease length in seconds (a dispatched task holds the plane
+    #: for this long unless a heartbeat refreshes it).
+    lease_s: int = DEFAULT_LEASE_S
 
 
 def resolve_home(
@@ -67,6 +75,18 @@ def resolve_home(
     return base / ".foreman"
 
 
+def _read_home_json(home: str | os.PathLike[str]) -> dict:
+    """Raw JSON object of ``${FOREMAN_HOME}/agents.json`` — never raises."""
+    path = Path(home).expanduser() / AGENTS_FILE
+    try:
+        if not path.is_file():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def load_agents(home: str | os.PathLike[str]) -> dict[str, dict]:
     """Load ``${FOREMAN_HOME}/agents.json`` merged over the built-in agents.
 
@@ -74,15 +94,7 @@ def load_agents(home: str | os.PathLike[str]) -> dict[str, dict]:
     agents are returned instead.
     """
     agents: MutableMapping[str, dict] = {name: dict(spec) for name, spec in BUILTIN_AGENTS.items()}
-    path = Path(home).expanduser() / AGENTS_FILE
-    try:
-        if not path.is_file():
-            return dict(agents)
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return dict(agents)
-    if not isinstance(data, dict):
-        return dict(agents)
+    data = _read_home_json(home)
     extra = data.get("agents")
     if isinstance(extra, dict):
         for name, spec in extra.items():
@@ -92,6 +104,15 @@ def load_agents(home: str | os.PathLike[str]) -> dict[str, dict]:
             merged.update(spec)
             agents[str(name)] = merged
     return dict(agents)
+
+
+def load_settings(home: str | os.PathLike[str]) -> dict:
+    """Top level settings of ``${FOREMAN_HOME}/agents.json`` — never raises.
+
+    The ``agents`` key is handled by :func:`load_agents`; everything else
+    (for example ``lease_s``) is a plain setting of the plane.
+    """
+    return {key: value for key, value in _read_home_json(home).items() if key != "agents"}
 
 
 def _resolve_timeout(env: Mapping[str, str]) -> int:
@@ -104,6 +125,22 @@ def _resolve_timeout(env: Mapping[str, str]) -> int:
         if value > 0:
             return value
     return DEFAULT_TIMEOUT_S
+
+
+def _resolve_lease(env: Mapping[str, str], settings: Mapping[str, Any]) -> int:
+    """Lease length: ``FOREMAN_LEASE`` > ``agents.json`` ``lease_s`` > default."""
+    raw = (env.get(ENV_LEASE) or "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 0
+        if value > 0:
+            return value
+    value = settings.get("lease_s")
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and int(value) > 0:
+        return int(value)
+    return DEFAULT_LEASE_S
 
 
 def load_config(
@@ -119,6 +156,7 @@ def load_config(
         runs_dir=home / RUNS_DIR,
         agents=load_agents(home),
         timeout_s=_resolve_timeout(env),
+        lease_s=_resolve_lease(env, load_settings(home)),
     )
 
 
@@ -151,6 +189,7 @@ def describe(config: ForemanConfig, env: Mapping[str, str] | None = None) -> dic
         "ledger_path": str(config.ledger_path),
         "runs_dir": str(config.runs_dir),
         "timeout_s": config.timeout_s,
+        "lease_s": config.lease_s,
         "default_agent": resolve_default_agent(env),
         "agents": sorted(config.agents),
     }
@@ -159,14 +198,17 @@ def describe(config: ForemanConfig, env: Mapping[str, str] | None = None) -> dic
 __all__ = [
     "DEFAULT_TIMEOUT_S",
     "DEFAULT_AGENT",
+    "DEFAULT_LEASE_S",
     "ENV_HOME",
     "ENV_TIMEOUT",
     "ENV_AGENT",
     "ENV_ACTOR",
+    "ENV_LEASE",
     "BUILTIN_AGENTS",
     "ForemanConfig",
     "resolve_home",
     "load_agents",
+    "load_settings",
     "load_config",
     "resolve_default_agent",
     "resolve_actor",

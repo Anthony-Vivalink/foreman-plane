@@ -1,0 +1,19 @@
+{
+  "name": "basic",
+  "task_id": "T-20261123-41",
+  "depends_on": [
+    "T-20261123-40"
+  ],
+  "needs_api": [
+    "data/input.txt"
+  ],
+  "acceptance": "report.json::min_bytes=10::contains=done",
+  "lines": [
+    "[id] T-20261123-41",
+    "[depends_on] T-20261123-40",
+    "[needs_api] data/input.txt",
+    "[acceptance] report.json::min_bytes=10::contains=done",
+    "Produce the report artefact."
+  ],
+  "text": "[id] T-20261123-41\n[depends_on] T-20261123-40\n[needs_api] data/input.txt\n[acceptance] report.json::min_bytes=10::contains=done\nProduce the report artefact.\n"
+}

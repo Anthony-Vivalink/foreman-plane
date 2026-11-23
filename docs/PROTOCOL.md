@@ -111,6 +111,11 @@ are also collected inside `detail`, so both access styles work.
 | `done`     | the execution body finished     | `verdict` (`pass`/`fail`), `acceptance_ok` (bool/null), `exit_code` |
 | `cancelled`| cancelled by a human            | `reason`                                                           |
 | `replan`   | re-planned by a human           | `reason`, `new_task_id`                                            |
+| `heartbeat`| the worker is alive and renews its lease | `lease_expires_at`, `lease_s`                            |
+| `stale`    | the lease expired, the task is reclaimable | `reason`, `lease_expires_at`, `previous_status`     |
+| `checkpoint`| one step of the task is finished | `step`, `artifact` (optional)                                    |
+| `retry`    | one attempt failed and will be repeated | `attempt`, `delay_s`, `exit_code`, `max_attempts`     |
+| `attempt`  | a dispatch allocated an attempt      | `attempt_id`, `epoch`, `previous_attempt_id`, `attempt_dir` |
 
 **Ordering iron rule** — when the gate blocks, only a `blocked` event is
 written.  There is never a `dispatch` event for a task that did not run.
@@ -120,7 +125,7 @@ written.  There is never a `dispatch` event for a task that did not run.
 Events are folded per task id, in file order:
 
 * terminal states: `done` (with a verdict), `cancelled`
-* non terminal states: `dispatched`, `running`, `blocked`
+* non terminal states: `dispatched`, `running`, `blocked`, `stale` (lease expired)
 * the verdict of a task is the verdict of its **last** `done` event
 * a task without a `done` event has never passed
 
@@ -129,9 +134,18 @@ A dependency is satisfied when the upstream task is terminal, its verdict is
 
 ### 2.2 Idempotency
 
-Before dispatching, the plane checks whether the task id already carries a
-`dispatch` event.  If it does, the dispatch is refused with reason
-`duplicate_task` and **no** `dispatch` event is written.
+Before dispatching, the plane looks at the **current state** of the task,
+not at its history:
+
+| state                          | re-dispatch | reason          |
+| ------------------------------ | ----------- | --------------- |
+| `blocked`                      | allowed     | —               |
+| `stale` (lease expired)        | allowed     | —               |
+| `running` / `dispatched`, lease alive | refused    | `duplicate_task` |
+| `running` / `dispatched`, lease expired | allowed | —            |
+| `done` / `cancelled`           | refused     | `duplicate_task` |
+
+A refused dispatch writes **no** `dispatch` event.
 `--force` (CLI) / `force: true` (MCP) overrides the check; a replan
 allocates a fresh task id instead.
 
@@ -139,6 +153,52 @@ A `blocked` event does **not** trigger the duplicate check: the gate
 refused the task, so it never entered the plane.  A blocked task stays
 re-dispatchable and becomes dispatchable again as soon as its dependency
 is satisfied.
+
+### 2.3 Lease, checkpoints, recovery (v0.3.0)
+
+A successful dispatch takes a **lease**: the `dispatch` and `running` events
+carry `lease_expires_at` (UTC ISO-8601) and `lease_s` (the length, 900
+seconds by default — `FOREMAN_LEASE` or `lease_s` in `agents.json` override
+it).  A `heartbeat` event moves the deadline forward without changing the
+status of the task.
+
+`checkpoint` events name the steps a task already finished.  When the task
+is dispatched again, the collected step names are handed to the execution
+body through the optional `{completed_steps}` placeholder of the command
+template — the JSON array `["a","b"]`, or `[]` when there is no checkpoint.
+A template without the placeholder behaves exactly as before.
+
+`reclaim` writes a `stale` event for every task whose lease expired while
+it was still `running`.  A `stale` task may be dispatched again; the
+receipt then carries `completed_steps`, `skipped_steps` and `resumed`.
+
+`retry` events record one failed attempt of a retryable exit code.  A
+retry never writes a second `dispatch` event — the task stays idempotent
+and the dependency graph counts it once.
+
+Readers that do not know an event kind must ignore it: the fold simply has
+no branch for it.
+
+### 2.4 Attempts and the acceptance (v0.3.0)
+
+Every dispatch allocates an **attempt**: `attempt_id` (`{task_id}-aNN`, the
+second attempt of the same task gets the next number), `epoch` (starting at
+1) and an artefact directory `<workdir>/attempts/<attempt_id>/`.  The
+`attempt` event carries all of it plus the `previous_attempt_id`, so the
+ledger shows why a task ran twice.
+
+The semantics are **at-least-once with an idempotency key
+`(task_id, attempt_id)` — exactly-once is not promised**.  The plane runs
+an attempt at least once and never undoes side effects; a duplicate side
+effect across two attempts is the execution body's job to make idempotent.
+
+The acceptance reads the artefact of **this** attempt: a relative path is
+looked up inside the attempt directory first and only then in the base
+directory, and the receipt records the path, the sha256 and the checks that
+were really read.  A receipt that arrives after the task was cancelled —
+or after a newer attempt took over — is written to the ledger but is
+**not** the success of the current attempt: the fold counts it as a
+`late_receipt` instead.
 
 ---
 
@@ -290,16 +350,27 @@ An unknown task id answers with `isError: true` and
 | `dsh`     | `dsh headless <task>` |
 | `generic` | the `generic.command` template of `agents.json` |
 
-Templates accept the placeholders `{task}` (mandatory) and `{workdir}`
-(optional).  Custom agents are declared in `${FOREMAN_HOME}/agents.json`:
+Templates accept the placeholders `{task}` (mandatory), `{workdir}` (optional)
+and `{completed_steps}` (optional, v0.3.0 — the JSON array of the steps the
+task already checkpointed).  Custom agents are declared in
+`${FOREMAN_HOME}/agents.json`:
 
 ```json
 {
   "agents": {
-    "mybot": { "command": "mybot run --prompt {task}", "timeout_s": 600 }
+    "mybot": {
+      "command": "mybot run --prompt {task} --done {completed_steps}",
+      "timeout_s": 600,
+      "retry": {"max_attempts": 3, "base_delay_s": 5, "retry_on_exit_codes": [124]}
+    }
   }
 }
 ```
+
+The `retry` block is optional and **off by default**: without it the plane
+runs the body exactly once, as in 0.2.x.  `max_attempts` counts the total
+number of attempts (the first run included), the delay before the n-th retry
+is `base_delay_s * 2 ** (n - 1)`, and every retry writes one `retry` event.
 
 * Unknown agent or missing binary → exit code `127`, stderr
   `agent not found: <name>`; nothing is raised.

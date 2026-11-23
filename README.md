@@ -354,6 +354,7 @@ graph would deadlock and the upstream could never unblock it.
 | --- | --- | --- |
 | `FOREMAN_HOME` | `$HOME/.foreman` | plane home: ledger, run logs, agents.json |
 | `FOREMAN_TIMEOUT` | `900` | execution timeout in seconds |
+| `FOREMAN_LEASE` | `900` | lease length in seconds — how long a dispatched task holds the plane |
 | `FOREMAN_AGENT` | `generic` | default execution body |
 | `FOREMAN_ACTOR` | `foreman` | actor recorded in the ledger |
 
@@ -377,6 +378,8 @@ For where this stops being the right tool, see
 | exit 2, `dependency_unparsed` | the `[depends_on]` marker could not be parsed | fix the card — the plane refuses to guess |
 | exit 2, `dependency_cycle` | the dependency graph loops | break the cycle |
 | exit 2, `duplicate_task` | that id already has a `dispatch` event | a new id, `--force`, or `foreman-plane ledger replan` |
+| a task is stuck on `running` | the worker died, the ledger kept its last event | `foreman-plane reclaim` once the lease expired, then dispatch it again |
+| `duplicate_task` but the worker is long dead | the lease expired and nobody reclaimed it | `foreman-plane reclaim` — the task becomes `stale` and is dispatchable |
 | exit 2, `task_id_missing` | the card has no `[id]` | add one |
 | exit 3 | the artefact is missing, too small or missing the marker | read the run log in `runs/` |
 | `exit_code: 127`, `no such agent, or its command template is empty` | the agent name is not in `agents.json` | add the agent, or use one of the built-ins |
@@ -575,8 +578,248 @@ Every decision is one JSON line in `${FOREMAN_HOME}/ledger.jsonl`:
 {"ts":"2026-11-09T09:41:02.113456+00:00","event":"dispatch","task_id":"T-20261109-20","actor":"foreman","depends_on":["T-20261109-01"],"needs_api":[],"acceptance":"reports/report.md::min_bytes=200","needs_api_pending":false,"detail":{}}
 ```
 
-Event types: `dispatch`, `running`, `blocked`, `done`, `cancelled`, `replan`.
-History is never rewritten or deleted.
+Event types: `dispatch`, `running`, `blocked`, `done`, `cancelled`, `replan`,
+plus the failure & recovery events `heartbeat`, `stale`, `checkpoint` and
+`retry`. History is never rewritten or deleted.
+
+## Failure & Recovery
+
+A worker that dies used to take the whole task with it. The ledger stopped
+on `running`, every re-dispatch was refused as `duplicate_task`, and the only
+way out was `--force` — which re-ran every finished step from scratch. This
+chapter is the fix: a lease, a reclaim, step checkpoints and a drill that
+proves the whole chain.
+
+### What can go wrong
+
+| Failure | What the ledger shows | What the plane does now |
+| --- | --- | --- |
+| Worker killed with `kill -9` | last event is `running` | the lease expires, `reclaim` marks the task `stale`, it can be dispatched again |
+| Worker hangs | last event is `running` | same — the lease is the liveness contract, not the process |
+| Worker exits with a retryable code | `done` with `verdict=fail` | optional exponential backoff, one `retry` event per attempt |
+
+The failure model is deliberately small: **one worker, one task, one plane**.
+There is no scheduler, no daemon and no quorum — see [Scope](#scope).
+
+### Lease and heartbeat
+
+A successful dispatch takes a **lease**: the ledger records
+`lease_expires_at` (UTC ISO8601) and `lease_s` (the length, 900 seconds by
+default). While the worker is alive it can push the deadline forward:
+
+```bash
+foreman-plane heartbeat T-20261109-20
+```
+
+A heartbeat writes one `heartbeat` event and moves the lease. It never
+changes the status of the task.
+
+Lease length is configuration, not code:
+
+| Where | How |
+| --- | --- |
+| environment | `FOREMAN_LEASE=1800` |
+| `agents.json` | `"lease_s": 1800` next to the `"agents"` key |
+| default | 900 seconds |
+
+### Stale and reclaim
+
+When the lease is over, the task is not lost — it is *stale*. The reclaim
+sweep marks every expired task, and only that:
+
+```bash
+foreman-plane reclaim --dry-run          # report only, writes nothing
+foreman-plane reclaim                     # mark the expired tasks stale
+foreman-plane reclaim --task-id T-20261109-20 --now 2026-11-09T12:00:00+00:00
+```
+
+The re-dispatch rule follows the state, not the history:
+
+| State of the task | Re-dispatch |
+| --- | --- |
+| `blocked` | **allowed** — it never entered the plane (unchanged since 0.1.0) |
+| `stale` | **allowed** — the lease expired |
+| `running` / `dispatched`, lease alive | refused, `duplicate_task` |
+| `running` / `dispatched`, lease expired | **allowed** — the worker is presumed dead |
+| `done` / `cancelled` | refused, `duplicate_task` (use `--force` or `ledger replan`) |
+
+A task whose lease expired and that is dispatched again without a reclaim
+gets a `stale` event first, so the trail always says *why* it ran twice.
+
+### Checkpoints — the work that is already done
+
+An execution body can record that one step is finished:
+
+```bash
+foreman-plane checkpoint T-20261109-20 --step "fetch data" --artifact out/raw.json
+```
+
+The step name is free text; the ledger only stores it. A re-dispatch hands
+the collected step names to the execution body through the optional
+`{completed_steps}` placeholder:
+
+```json
+{"agents": {"mybot": {"command": "mybot run --task {task} --done {completed_steps}"}}}
+```
+
+`{completed_steps}` is replaced by the JSON array of the steps the task
+already checkpointed (`["fetch data"]`, or `[]` when there is none). The
+receipt repeats it, so "no duplicated work" is checkable without reading the
+ledger:
+
+```json
+{"completed_steps": ["fetch data"], "skipped_steps": ["fetch data"], "resumed": true}
+```
+
+A template without the placeholder keeps working exactly as before — the
+placeholder is optional, `{task}` is still mandatory.
+
+### Observability
+
+`foreman-plane status` shows, for every task that is not finished:
+
+```text
+$ foreman-plane status --task-id T-20261109-20
+task_id: T-20261109-20
+status: running
+verdict: None
+acceptance_ok: None
+exit_code: None
+last_ts: 2026-11-09T09:41:03.201114+00:00
+lease_expires_at: 2026-11-09T09:56:02.113456+00:00
+lease_remaining_s: 899.2
+age_s: 42.5
+completed_steps_count: 1
+recoveries: 0
+retries: 0
+```
+
+`--json` carries the same fields per task, next to the ones that existed
+before. Nothing was removed or renamed.
+
+### Backoff retry
+
+Retrying is **off by default** — 0.2.x behaviour is unchanged. Switch it on
+per execution body:
+
+```json
+{"agents": {"mybot": {
+  "command": "mybot run {task}",
+  "retry": {"max_attempts": 3, "base_delay_s": 5, "retry_on_exit_codes": [124, 75]}
+}}}
+```
+
+`max_attempts` counts the total number of attempts, the first run included:
+`1` means no retry, `3` means "run at most three times". The delay before
+the n-th retry is `base_delay_s * 2 ** (n - 1)`. Every retry writes one
+`retry` event (`attempt`, `delay_s`, `exit_code`, stderr tail) and refreshes
+the lease — and it never writes a second `dispatch` event, so the task stays
+idempotent and the dependency graph counts it once.
+
+### The drill
+
+The whole story runs in one command — no network, no real agent, nothing
+outside a throw-away `/tmp` directory:
+
+```bash
+scripts/failure_drill.sh
+```
+
+It prepares a fake three-step worker, dispatches a card, kills the worker
+with `kill -9` half way through, shows the refused re-dispatch, lets the
+lease expire, reclaims the task, dispatches it again and checks that the
+finished step did **not** run twice. The output of a real run is in
+[`docs/failure_drill_sample_output.txt`](docs/failure_drill_sample_output.txt).
+
+### Attempts — the unit of work
+
+Every dispatch is an **attempt**: it has an id, an epoch and its own
+artefact directory (`<workdir>/attempts/<task_id>-aNN/`). Two attempts of
+the same task never share a directory, so the artefact of a crashed run
+can never be mistaken for the artefact of the next one.
+
+```bash
+foreman-plane attempts T-20261123-51
+```
+
+```
+task_id: T-20261123-51
+attempt_state: still_running
+current_attempt_id: T-20261123-51-a01
+late_receipts: 0
+  T-20261123-51-a01 epoch=1 status=running verdict=None artifact=None
+```
+
+`attempt_state` is derived from the ledger, not guessed: `still_running`
+(the lease is alive), `interrupted` (the lease expired without a terminal
+event), `outcome_unknown` (a receipt arrived that cannot be attributed —
+or the task comes from a 0.2.x ledger that has no lease at all),
+`finished` and `not_started`.
+
+**The semantics are at-least-once with an idempotency key — never
+exactly-once.** The plane runs an attempt at least once; it does not undo
+side effects and it does not promise that a side effect happens only
+once. The idempotency key is `(task_id, attempt_id)`: a duplicate
+delivery inside one attempt is refused by the ledger, and a duplicate
+*side effect* across two attempts is the execution body's job to make
+idempotent (writing only into `FOREMAN_ATTEMPT_DIR` is the cheapest way
+to do it). About the race itself the plane promises exactly one thing: a
+receipt that arrives late is never counted as the success of the current
+attempt.
+
+### Explicit retry vs reclaim
+
+Two verbs, two different jobs:
+
+| | `reclaim` | `retry` |
+| --- | --- | --- |
+| what it does | marks a task whose lease expired as `stale` | allocates a **new attempt** and runs the body again |
+| does it execute? | no | yes |
+| does it accept an artefact? | no | yes — the artefact of *that* attempt |
+| when you need it | the plane crashed, nobody knows whether the worker is alive | you know the task has to run again |
+
+```bash
+foreman-plane reclaim --dry-run     # report only
+foreman-plane reclaim               # mark the stale ones
+foreman-plane retry T-20261123-51   # run it again, as a new attempt
+```
+
+`retry` refuses while the current attempt still holds a live lease; pass
+`--force` if you really mean it, and `--dry-run` to see what it would do.
+Its receipt carries `attempt_id`, `epoch`, `previous_attempt_id` and
+`retry_mode: explicit`.
+
+### The acceptance only accepts the current attempt
+
+A relative artefact path is looked up **inside the attempt directory
+first** and only then in the base directory, so the acceptance reads the
+file *this* attempt produced — not the one a previous attempt left
+behind. The receipt records what was really read: `acceptance_path`,
+`acceptance_sha256`, `acceptance_size` and `acceptance_checks`.
+
+If the task was cancelled — or a newer attempt took over — while the
+worker was running, the late receipt is written to the ledger but **not**
+taken for the success of the current attempt: `superseded` is true, with
+`superseded_reason` `cancelled_during_run` or
+`superseded_by_new_attempt`, and the fold counts it as a `late_receipt`.
+
+```bash
+scripts/artifact_gate_drill.sh
+```
+
+The drill tells the whole story: the first attempt is killed before it can
+write `done`, the second attempt writes its own artefact, the acceptance
+takes the second one and only then does the dependent task run. The real
+output is in
+[`docs/artifact_gate_drill_sample_output.txt`](docs/artifact_gate_drill_sample_output.txt).
+
+### Where this stops
+
+This is still a personal-tool plane: one process, one file, one machine.
+There is no multi-tenancy, no RBAC, no high availability and no automatic
+supervisor — `reclaim` is something *you* run (from cron, if you like).
+The new machinery makes a dead worker recoverable; it does not make the
+plane a cluster.
 
 ## MCP tools
 
@@ -592,10 +835,15 @@ not a binary name, so the CLI rename does not touch them.
 ## CLI
 
 ```
-foreman-plane dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
-foreman-plane status   [--task-id ID] [--json]
-foreman-plane ledger   list | show | ready | blocked | cancel | replan
-foreman-plane verify   --acceptance "<acceptance string>"
+foreman-plane dispatch   --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
+foreman-plane status     [--task-id ID] [--json]
+foreman-plane heartbeat  TASK_ID [--json]
+foreman-plane checkpoint TASK_ID --step NAME [--artifact PATH] [--json]
+foreman-plane reclaim    [--task-id ID] [--dry-run] [--now ISO8601] [--json]
+foreman-plane attempts  TASK_ID [--json]
+foreman-plane retry     TASK_ID [--card PATH] [--reason TEXT] [--force] [--dry-run] [--json]
+foreman-plane ledger     list | show | ready | blocked | cancel | replan
+foreman-plane verify     --acceptance "<acceptance string>"
 foreman-plane mcp
 foreman-plane config
 ```

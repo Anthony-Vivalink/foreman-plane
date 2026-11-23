@@ -1,0 +1,194 @@
+foreman-plane v0.3.0 — artefact gate drill, real output
+========================================================
+
+This is the verbatim output of `scripts/artifact_gate_drill.sh` on a
+machine with bash and python3 (>= 3.10).  Nothing in the story is mocked:
+the worker really writes its artefact, the dispatcher is really killed
+with `kill -9` before it can write the `done` event, the gate really
+refuses the dependent task, and the retry really produces a second
+attempt in its own artefact directory.
+
+Only one thing is edited: the random name of the throw-away temp directory
+is replaced by the placeholder `<tmp>` — every run creates a new one.
+Timestamps are the real ones of that run.
+
+
+== 1. a fresh plane, two cards, one worker ==
+FOREMAN_HOME : <tmp>/home
+task A       : T-20261123-51  (produces report.json)
+task B       : T-20261123-52  (depends on A, produces report_b.json)
+decoy        : <tmp>/report.json  (COMPLETE but STALE — it would pass the criterion)
+
+== 2. dispatch A — the worker writes the artefact and is then killed ==
+dispatcher pid: 80
+the artefact of the first attempt: <tmp>/attempts/T-20261123-51-a01/report.json
+its content: PARTIAL
+
+== 3. kill -9 the dispatcher before it can write the done event ==
+dispatcher killed — the ledger has no done event for T-20261123-51
+
+== 4. the ledger after the crash ==
+{"ts": "2026-11-23T06:58:20.360098+00:00", "event": "attempt", "task_id": "T-20261123-51", "actor": "foreman", "attempt_id": "T-20261123-51-a01", "epoch": 1, "reason": "dispatch", "previous_attempt_id": null, "attempt_dir": "<tmp>/attempts/T-20261123-51-a01", "lease_expires_at": "2026-11-23T07:13:20.359980+00:00", "lease_s": 900, "detail": {"attempt_id": "T-20261123-51-a01", "epoch": 1, "reason": "dispatch", "previous_attempt_id": null, "attempt_dir": "<tmp>/attempts/T-20261123-51-a01", "lease_expires_at": "2026-11-23T07:13:20.359980+00:00", "lease_s": 900}}
+{"ts": "2026-11-23T06:58:20.360218+00:00", "event": "dispatch", "task_id": "T-20261123-51", "actor": "foreman", "depends_on": [], "needs_api": [], "acceptance": "report.json::contains=COMPLETE", "needs_api_pending": false, "agent": "gateagent", "workdir": "<tmp>", "force": false, "lease_expires_at": "2026-11-23T07:13:20.359980+00:00", "lease_s": 900, "completed_steps": [], "recovered": false, "attempt_id": "T-20261123-51-a01", "epoch": 1, "attempt_dir": "<tmp>/attempts/T-20261123-51-a01", "card_path": "<tmp>/card_a.md", "card_sha256": "c59b5684e1929b8f23d5413964305990d0c01c2559339f333c23314b9e483e16", "detail": {"depends_on": [], "needs_api": [], "acceptance": "report.json::contains=COMPLETE", "needs_api_pending": false, "agent": "gateagent", "workdir": "<tmp>", "force": false, "lease_expires_at": "2026-11-23T07:13:20.359980+00:00", "lease_s": 900, "completed_steps": [], "recovered": false, "attempt_id": "T-20261123-51-a01", "epoch": 1, "attempt_dir": "<tmp>/attempts/T-20261123-51-a01", "card_path": "<tmp>/card_a.md", "card_sha256": "c59b5684e1929b8f23d5413964305990d0c01c2559339f333c23314b9e483e16"}}
+{"ts": "2026-11-23T06:58:20.360288+00:00", "event": "running", "task_id": "T-20261123-51", "actor": "foreman", "agent": "gateagent", "lease_expires_at": "2026-11-23T07:13:20.359980+00:00", "lease_s": 900, "attempt_id": "T-20261123-51-a01", "epoch": 1, "detail": {"agent": "gateagent", "lease_expires_at": "2026-11-23T07:13:20.359980+00:00", "lease_s": 900, "attempt_id": "T-20261123-51-a01", "epoch": 1}}
+  status            : running
+  attempt_id        : T-20261123-51-a01
+  epoch             : 1
+  attempt_state     : still_running
+  late_receipts     : 0
+  lease_expires_at  : 2026-11-23T07:13:20.359980+00:00
+
+== 5. the plane is restarted — task B must not run ==
+{
+  "ok": false,
+  "blocked": true,
+  "dispatched": false,
+  "reason": "dependency_pending",
+  "task_id": "T-20261123-52",
+  "missing": [
+    "T-20261123-51"
+  ],
+  "needs_api_pending": false,
+  "notes": [
+    "dependency T-20261123-51 is still running"
+  ]
+}
+exit code: 2 (2 = the gate refused the task)
+B wrote nothing — the gate held
+
+== 6. check the attempt of A: the lease is alive, the worker is presumed dead ==
+  status            : running
+  attempt_id        : T-20261123-51-a01
+  epoch             : 1
+  attempt_state     : still_running
+  late_receipts     : 0
+  lease_expires_at  : 2026-11-23T07:13:20.359980+00:00
+the attempt of A is 'still_running' — the lease is still valid
+
+== 7. let the lease expire, then reclaim A ==
+evaluating the leases at 2026-11-23T07:58:20.659087+00:00 (one hour ahead)
+{
+  "ok": true,
+  "dry_run": false,
+  "now": "2026-11-23T07:58:20.659087+00:00",
+  "marked": [
+    {
+      "task_id": "T-20261123-51",
+      "status": "running",
+      "lease_expires_at": "2026-11-23T07:13:20.359980+00:00",
+      "lease_remaining_s": -2700.299
+    }
+  ],
+  "active": [],
+  "skipped": [
+    {
+      "task_id": "T-20261123-52",
+      "status": "blocked",
+      "reason": "not_running"
+    }
+  ],
+  "marked_count": 1,
+  "active_count": 0,
+  "skipped_count": 1
+}
+  status            : stale
+  attempt_id        : T-20261123-51-a01
+  epoch             : 1
+  attempt_state     : interrupted
+  late_receipts     : 0
+  lease_expires_at  : 2026-11-23T07:13:20.359980+00:00
+
+== 8. explicitly retry A — a new attempt, a new artefact directory ==
+{
+  "ok": true,
+  "blocked": false,
+  "dispatched": true,
+  "task_id": "T-20261123-51",
+  "verdict": "pass",
+  "raw_verdict": "pass",
+  "acceptance_ok": true,
+  "acceptance_reason": null,
+  "acceptance_path": "<tmp>/attempts/T-20261123-51-a02/report.json",
+  "acceptance_sha256": "a4bccf5c13ef5ff8311e59b34d492bc7072a55298723601a6a9c127053aee8fc",
+  "acceptance_size": 9,
+  "needs_api_pending": false,
+  "exit_code": 0,
+  "duration_s": 0.023,
+  "timed_out": false,
+  "stderr": "",
+  "notes": [],
+  "completed_steps": [],
+  "skipped_steps": [],
+  "resumed": false,
+  "attempts": 1,
+  "retries": 0,
+  "recovered": false,
+  "lease_expires_at": "2026-11-23T07:13:20.814644+00:00",
+  "lease_remaining_s": 900.0,
+  "attempt_id": "T-20261123-51-a02",
+  "epoch": 2,
+  "attempt_dir": "<tmp>/attempts/T-20261123-51-a02",
+  "previous_attempt_id": "T-20261123-51-a01",
+  "superseded": false,
+  "superseded_reason": null,
+  "retry_mode": "explicit"
+}
+
+== 9. what the acceptance really accepted ==
+  accepted path  : <tmp>/attempts/T-20261123-51-a02/report.json
+  accepted sha256: a4bccf5c13ef5ff8311e59b34d492bc7072a55298723601a6a9c127053aee8fc
+  attempt        : T-20261123-51-a02 epoch 2
+  done events    : 1
+
+== 10. the artefacts on disk ==
+  attempts/T-20261123-51-a01/report.json : PARTIAL
+  attempts/T-20261123-51-a02/report.json : COMPLETE
+  the decoy <tmp>/report.json : COMPLETE but STALE
+
+== 11. now B may run ==
+{
+  "ok": true,
+  "blocked": false,
+  "dispatched": true,
+  "task_id": "T-20261123-52",
+  "verdict": "pass",
+  "raw_verdict": "pass",
+  "acceptance_ok": true,
+  "acceptance_reason": null,
+  "acceptance_path": "<tmp>/attempts/T-20261123-52-a01/report_b.json",
+  "acceptance_sha256": "a4bccf5c13ef5ff8311e59b34d492bc7072a55298723601a6a9c127053aee8fc",
+  "acceptance_size": 9,
+  "needs_api_pending": false,
+  "exit_code": 0,
+  "duration_s": 0.022,
+  "timed_out": false,
+  "stderr": "",
+  "notes": [],
+  "completed_steps": [],
+  "skipped_steps": [],
+  "resumed": false,
+  "attempts": 1,
+  "retries": 0,
+  "recovered": false,
+  "lease_expires_at": "2026-11-23T07:13:20.920989+00:00",
+  "lease_remaining_s": 900.0,
+  "attempt_id": "T-20261123-52-a01",
+  "epoch": 1,
+  "attempt_dir": "<tmp>/attempts/T-20261123-52-a01",
+  "previous_attempt_id": null,
+  "superseded": false,
+  "superseded_reason": null
+}
+
+== summary ==
+attempts of A      : T-20261123-51-a01, T-20261123-51-a02
+accepted artefact  : report.json
+accepted in attempt: T-20261123-51-a02
+sha256 accepted    : a4bccf5c13ef5ff8311e59b34d492bc7072a55298723601a6a9c127053aee8fc
+sha256 of attempt 1: 440ec0b3694e1fb7903efe625f793963598e9a5a577bf8717f444407bde85edd
+sha256 of attempt 2: a4bccf5c13ef5ff8311e59b34d492bc7072a55298723601a6a9c127053aee8fc
+sha256 of the decoy: d95f956db65b68c1834316a8e9a7d487f3f6581b9af1af1edc20c07f678cdbf1
+B wrote            : report_b.json
+drill result: OK
+
+drill OK — the interrupted attempt was not accepted, the retried attempt was, and only then B ran.

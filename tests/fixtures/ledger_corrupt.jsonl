@@ -1,0 +1,5 @@
+{"ts": "2026-11-23T12:00:00+00:00", "event": "dispatch", "task_id": "T-20261123-52", "actor": "foreman", "agent": "fake", "depends_on": [], "needs_api": [], "detail": {"agent": "fake", "depends_on": [], "needs_api": []}}
+{"ts": "2026-11-23T12:00:00+00:00", "event": "running", "task_id": "T-2026112
+{"ts": "2026-11-23T12:00:01+00:00", "event": "quantum_flux", "task_id": "T-20261123-52", "actor": "foreman", "detail": {}}
+this line is not json at all
+{"ts": "2026-11-23T12:05:00+00:00", "event": "done", "task_id": "T-20261123-52", "actor": "foreman", "verdict": "pass", "acceptance_ok": true, "exit_code": 0, "agent": "fake", "detail": {"verdict": "pass", "acceptance_ok": true, "exit_code": 0, "agent": "fake"}}

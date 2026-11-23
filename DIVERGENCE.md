@@ -3,7 +3,7 @@
 > 本文件记录**两条代码线之间的关系**，以及「本机改动要不要回灌进包」的判据。
 > 写给维护者（也写给未来的我）：每次改完本机那套，先回来查一次这张表。
 >
-> 最后更新：2026-11-13
+> 最后更新：2026-11-23
 >
 > **占位符约定**：下文出现的 `<本机实例目录>` 指的是发布者本机上实际在跑的那套
 > foreman-tasks 实例目录（其状态目录 `<本机实例目录>/home/` 与发布版的
@@ -39,6 +39,9 @@
 | **验收判据键集** | `src/foreman_plane/acceptance.py`：**只有 4 个键** —— `min_bytes`、`sha256`、`contains`、`exit_code` | 同上，卡里的 `::` 串 | **本机卡片只能用这 4 个键**。新增键必须先进包，否则包判 `acceptance_unknown_criterion` → 记 fail |
 | **状态目录布局** | `FOREMAN_HOME` / `$HOME/.foreman`：`agents.json` + `ledger.jsonl` + `runs/` | `<本机实例目录>/home/`：同名同构 | 布局改名 → 本机所有绝对路径要改 |
 | **任务号形状** | `T-YYYYMMDD-NN` | 同 | 形状放宽/收紧 → 两侧都要验 |
+| **台账事件类型（v0.3.0 起）** | `src/foreman_plane/ledger.py`：`dispatch`/`running`/`blocked`/`done`/`cancelled`/`replan` + 新增 `heartbeat`/`stale`/`checkpoint`/`retry` | 同上 | 包侧加了新事件 kind → **本机读台账的代码必须能安全忽略不认识的 kind**，否则读不动新台账 |
+| **新事件的状态语义（v0.3.0）** | `stale` = 租约过期、可再派；`blocked` = 从没进过平面、可再派 | 同 | 本机若自己判「能不能再派」，口径必须跟包一致，否则两边会互相把任务锁死 |
+| **attempt 维度与幂等键（v0.3.0）** | `src/foreman_plane/ledger.py`：`attempt` 事件 + `attempt_id` / `epoch` / `attempt_dir`；幂等键 = `(task_id, attempt_id)`；语义 at-least-once，**不承诺 exactly-once** | 同（本机台账同构） | 本机自己派单 / 重试时也要**按 attempt 记账**，幂等键口径必须一致；否则两边各跑一遍同一张卡，或把迟到回执当成成功 |
 
 **同步动作**：共享面改了 → 本机侧改完 → **发一个 patch 版本**（`0.2.x`），
 并在下面 §4 的案例区追加一行。
@@ -55,6 +58,12 @@
 - **47 条 cron 编排**：`run_daily.sh <agent>` 驱动
 - **治理控制层**：`collect_evidence.py` / `apply_control.py` / `control_plan.md` / `control_actions.json`
   （裁决轮：继续 / 暂停 / 取消 / 重规划四态）
+
+**attempt 维度属共享面（已进包），本机专有面不回灌**：attempt / epoch / 幂等键 / 验收归属 /
+`still_running`-`interrupted`-`outcome_unknown` 三态判定，都是两侧共用的台账语义，**在包里**；
+上面列的 6 个专用 agent、四态 verdict、artifacts 约定、47 条 cron 编排、治理控制层是**本机专有**，
+**不回灌进包**。本机侧要做的只是「按 attempt 记账 + 幂等键口径对齐」，不需要在包外另造一套
+attempt 语义。
 
 **本机怎么把四态塞进包的二态**：卡里写
 `acceptance=...::exit_code=0::contains="verdict": "green"`。
@@ -135,3 +144,4 @@
 | 2026-11-12 | 0.2.0 | 改名 `foreman-plane`（别名 `gongtou`）、包名 `foreman_plane`、scope 章节 |
 | 2026-11-13 | — | 本文件建立。**共享面未变，无新版本** |
 | 2026-11-23 | 0.2.1 | 公共面修订（README 重写 + SECURITY/CONTRIBUTING/模板 + 实例路径脱敏）。**共享面未变** |
+| 2026-11-23 | 0.3.0 | 故障恢复与可观测：租约/心跳/`stale` 回收/步骤 checkpoint/退避重试/`status` 新字段 + `scripts/failure_drill.sh`。**共享面变了**（台账新增 5 个事件 kind、`stale` 状态语义、再派单口径、CLI 新增 5 个子命令、可选 `{completed_steps}` 占位符与 `lease_s`/`retry` 配置、**attempt 维度与幂等键（at-least-once 语义）**）→ **要发 0.3.0（minor：新增 CLI 子命令与事件 kind）**，本机侧必须同步：① 读台账的代码要能忽略未知 kind；② 本机自己的「能不能再派」口径要跟包一致 |

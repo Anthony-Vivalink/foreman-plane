@@ -1,0 +1,143 @@
+foreman-plane v0.3.0 — failure drill, real output
+=================================================
+
+This is the verbatim output of `scripts/failure_drill.sh` on a machine with
+bash, python3 (>= 3.10) and ps.  Nothing in the story is mocked: the worker
+is a real process, it is really killed with `kill -9`, the ledger really
+ends on "running" and the re-dispatch really skips the finished step.
+
+Only one thing is edited: the random name of the throw-away temp directory
+is replaced by the placeholder `<tmp>` — every run creates a new one.
+Timestamps are the real ones of that run.
+
+
+== 1. a fresh plane and a three step card ==
+FOREMAN_HOME : <tmp>/home
+agent        : fake (fake_agent.py, writes a checkpoint per step)
+【id】T-20261123-01
+三步任务：step_a → step_b → step_c。每完成一步写一次 checkpoint。
+
+== 2. dispatch the card — the worker will be killed half way through ==
+dispatcher pid: 18
+first checkpoint seen — the worker is now sleeping in step_b
+
+== 3. kill -9 the worker (the whole process group of the dispatcher) ==
+worker killed — the ledger keeps the last event the worker wrote
+
+== 4. the task is stuck in running: the lease is alive, a re-dispatch is refused ==
+  status            : running
+  lease_expires_at  : 2026-11-23T07:13:19.417013+00:00
+  lease_remaining_s : 899.787
+  age_s             : 0.213
+  completed_steps   : ['step_a']
+  recoveries        : 0
+  retries           : 0
+{
+  "ok": false,
+  "blocked": true,
+  "dispatched": false,
+  "reason": "duplicate_task",
+  "task_id": "T-20261123-01",
+  "missing": [],
+  "needs_api_pending": false,
+  "notes": [
+    "task T-20261123-01 was already dispatched",
+    "lease still held, 900s left"
+  ],
+  "status": "running",
+  "lease_expires_at": "2026-11-23T07:13:19.417013+00:00",
+  "lease_remaining_s": 899.73
+}
+exit code: 2 (2 = refused, the task still holds its lease)
+
+== 5. let the lease expire, then reclaim the task ==
+evaluating the leases at 2026-11-23T07:58:19.708905+00:00 (one hour ahead)
+{
+  "ok": true,
+  "dry_run": false,
+  "now": "2026-11-23T07:58:19.708905+00:00",
+  "marked": [
+    {
+      "task_id": "T-20261123-01",
+      "status": "running",
+      "lease_expires_at": "2026-11-23T07:13:19.417013+00:00",
+      "lease_remaining_s": -2700.292
+    }
+  ],
+  "active": [],
+  "skipped": [],
+  "marked_count": 1,
+  "active_count": 0,
+  "skipped_count": 0
+}
+
+== 6. dispatch the task again — the finished step must not run twice ==
+{
+  "ok": true,
+  "blocked": false,
+  "dispatched": true,
+  "task_id": "T-20261123-01",
+  "verdict": "pass",
+  "raw_verdict": "pass",
+  "acceptance_ok": null,
+  "acceptance_reason": null,
+  "acceptance_path": null,
+  "acceptance_sha256": null,
+  "acceptance_size": null,
+  "needs_api_pending": false,
+  "exit_code": 0,
+  "duration_s": 0.331,
+  "timed_out": false,
+  "stderr": "",
+  "notes": [
+    "re-dispatch: step_a already done — handed to the execution body as {completed_steps}"
+  ],
+  "completed_steps": [
+    "step_a"
+  ],
+  "skipped_steps": [
+    "step_a"
+  ],
+  "resumed": true,
+  "attempts": 1,
+  "retries": 0,
+  "recovered": false,
+  "lease_expires_at": "2026-11-23T07:13:19.808914+00:00",
+  "lease_remaining_s": 900.0,
+  "attempt_id": "T-20261123-01-a02",
+  "epoch": 2,
+  "attempt_dir": "<tmp>/attempts/T-20261123-01-a02",
+  "previous_attempt_id": "T-20261123-01-a01",
+  "superseded": false,
+  "superseded_reason": null
+}
+
+== 7. the whole ledger ==
+{"ts": "2026-11-23T06:58:19.417127+00:00", "event": "attempt", "task_id": "T-20261123-01", "actor": "foreman", "attempt_id": "T-20261123-01-a01", "epoch": 1, "reason": "dispatch", "previous_attempt_id": null, "attempt_dir": "<tmp>/attempts/T-20261123-01-a01", "lease_expires_at": "2026-11-23T07:13:19.417013+00:00", "lease_s": 900, "detail": {"attempt_id": "T-20261123-01-a01", "epoch": 1, "reason": "dispatch", "previous_attempt_id": null, "attempt_dir": "<tmp>/attempts/T-20261123-01-a01", "lease_expires_at": "2026-11-23T07:13:19.417013+00:00", "lease_s": 900}}
+{"ts": "2026-11-23T06:58:19.417228+00:00", "event": "dispatch", "task_id": "T-20261123-01", "actor": "foreman", "depends_on": [], "needs_api": [], "acceptance": null, "needs_api_pending": false, "agent": "fake", "workdir": "<tmp>", "force": false, "lease_expires_at": "2026-11-23T07:13:19.417013+00:00", "lease_s": 900, "completed_steps": [], "recovered": false, "attempt_id": "T-20261123-01-a01", "epoch": 1, "attempt_dir": "<tmp>/attempts/T-20261123-01-a01", "card_path": "<tmp>/card.md", "card_sha256": "cc15c8f63ce8b2c1c17c95485ca8898c20cdd1bda3b8712c86f0829c86c46f89", "detail": {"depends_on": [], "needs_api": [], "acceptance": null, "needs_api_pending": false, "agent": "fake", "workdir": "<tmp>", "force": false, "lease_expires_at": "2026-11-23T07:13:19.417013+00:00", "lease_s": 900, "completed_steps": [], "recovered": false, "attempt_id": "T-20261123-01-a01", "epoch": 1, "attempt_dir": "<tmp>/attempts/T-20261123-01-a01", "card_path": "<tmp>/card.md", "card_sha256": "cc15c8f63ce8b2c1c17c95485ca8898c20cdd1bda3b8712c86f0829c86c46f89"}}
+{"ts": "2026-11-23T06:58:19.417283+00:00", "event": "running", "task_id": "T-20261123-01", "actor": "foreman", "agent": "fake", "lease_expires_at": "2026-11-23T07:13:19.417013+00:00", "lease_s": 900, "attempt_id": "T-20261123-01-a01", "epoch": 1, "detail": {"agent": "fake", "lease_expires_at": "2026-11-23T07:13:19.417013+00:00", "lease_s": 900, "attempt_id": "T-20261123-01-a01", "epoch": 1}}
+{"ts": "2026-11-23T06:58:19.484580+00:00", "event": "checkpoint", "task_id": "T-20261123-01", "actor": "foreman", "step": "step_a", "artifact": null, "detail": {"step": "step_a", "artifact": null}}
+{"ts": "2026-11-23T06:58:19.756476+00:00", "event": "stale", "task_id": "T-20261123-01", "actor": "foreman", "reason": "lease_expired", "lease_expires_at": "2026-11-23T07:13:19.417013+00:00", "previous_status": "running", "evaluated_at": "2026-11-23T07:58:19.708905+00:00", "detail": {"reason": "lease_expired", "lease_expires_at": "2026-11-23T07:13:19.417013+00:00", "previous_status": "running", "evaluated_at": "2026-11-23T07:58:19.708905+00:00"}}
+{"ts": "2026-11-23T06:58:19.809255+00:00", "event": "attempt", "task_id": "T-20261123-01", "actor": "foreman", "attempt_id": "T-20261123-01-a02", "epoch": 2, "reason": "dispatch", "previous_attempt_id": "T-20261123-01-a01", "attempt_dir": "<tmp>/attempts/T-20261123-01-a02", "lease_expires_at": "2026-11-23T07:13:19.808914+00:00", "lease_s": 900, "detail": {"attempt_id": "T-20261123-01-a02", "epoch": 2, "reason": "dispatch", "previous_attempt_id": "T-20261123-01-a01", "attempt_dir": "<tmp>/attempts/T-20261123-01-a02", "lease_expires_at": "2026-11-23T07:13:19.808914+00:00", "lease_s": 900}}
+{"ts": "2026-11-23T06:58:19.809350+00:00", "event": "dispatch", "task_id": "T-20261123-01", "actor": "foreman", "depends_on": [], "needs_api": [], "acceptance": null, "needs_api_pending": false, "agent": "fake", "workdir": "<tmp>", "force": false, "lease_expires_at": "2026-11-23T07:13:19.808914+00:00", "lease_s": 900, "completed_steps": ["step_a"], "recovered": false, "attempt_id": "T-20261123-01-a02", "epoch": 2, "attempt_dir": "<tmp>/attempts/T-20261123-01-a02", "card_path": "<tmp>/card.md", "card_sha256": "cc15c8f63ce8b2c1c17c95485ca8898c20cdd1bda3b8712c86f0829c86c46f89", "detail": {"depends_on": [], "needs_api": [], "acceptance": null, "needs_api_pending": false, "agent": "fake", "workdir": "<tmp>", "force": false, "lease_expires_at": "2026-11-23T07:13:19.808914+00:00", "lease_s": 900, "completed_steps": ["step_a"], "recovered": false, "attempt_id": "T-20261123-01-a02", "epoch": 2, "attempt_dir": "<tmp>/attempts/T-20261123-01-a02", "card_path": "<tmp>/card.md", "card_sha256": "cc15c8f63ce8b2c1c17c95485ca8898c20cdd1bda3b8712c86f0829c86c46f89"}}
+{"ts": "2026-11-23T06:58:19.809413+00:00", "event": "running", "task_id": "T-20261123-01", "actor": "foreman", "agent": "fake", "lease_expires_at": "2026-11-23T07:13:19.808914+00:00", "lease_s": 900, "attempt_id": "T-20261123-01-a02", "epoch": 2, "detail": {"agent": "fake", "lease_expires_at": "2026-11-23T07:13:19.808914+00:00", "lease_s": 900, "attempt_id": "T-20261123-01-a02", "epoch": 2}}
+{"ts": "2026-11-23T06:58:19.875695+00:00", "event": "checkpoint", "task_id": "T-20261123-01", "actor": "foreman", "step": "step_b", "artifact": null, "detail": {"step": "step_b", "artifact": null}}
+{"ts": "2026-11-23T06:58:20.130028+00:00", "event": "checkpoint", "task_id": "T-20261123-01", "actor": "foreman", "step": "step_c", "artifact": null, "detail": {"step": "step_c", "artifact": null}}
+{"ts": "2026-11-23T06:58:20.140903+00:00", "event": "done", "task_id": "T-20261123-01", "actor": "foreman", "verdict": "pass", "acceptance_ok": null, "exit_code": 0, "duration_s": 0.331, "timed_out": false, "agent": "fake", "acceptance_reason": null, "acceptance_path": null, "acceptance_sha256": null, "acceptance_size": null, "acceptance_checks": [], "stderr_tail": "", "attempts": 1, "completed_steps": ["step_a"], "attempt_id": "T-20261123-01-a02", "epoch": 2, "attempt_dir": "<tmp>/attempts/T-20261123-01-a02", "superseded": false, "superseded_reason": null, "detail": {"verdict": "pass", "acceptance_ok": null, "exit_code": 0, "duration_s": 0.331, "timed_out": false, "agent": "fake", "acceptance_reason": null, "acceptance_path": null, "acceptance_sha256": null, "acceptance_size": null, "acceptance_checks": [], "stderr_tail": "", "attempts": 1, "completed_steps": ["step_a"], "attempt_id": "T-20261123-01-a02", "epoch": 2, "attempt_dir": "<tmp>/attempts/T-20261123-01-a02", "superseded": false, "superseded_reason": null}}
+
+== 8. what the worker actually did ==
+RUN step_a
+SKIP step_a (already checkpointed)
+RUN step_b
+RUN step_c
+WORKER DONE
+
+== summary ==
+recoveries (stale events) : 1
+steps handed back as done : step_a
+step_a executed times     : 1  (1 = no duplicated work)
+step_b executed times     : 1
+step_c executed times     : 1
+final status              : done pass
+
+drill OK — the worker died, the task was reclaimed, the finished step was not repeated.

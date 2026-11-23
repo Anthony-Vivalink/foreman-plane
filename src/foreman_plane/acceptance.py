@@ -26,12 +26,20 @@ __all__ = ["AcceptanceResult", "verify", "parse_acceptance"]
 
 @dataclass
 class AcceptanceResult:
-    """Result of one acceptance verification (SPEC §5)."""
+    """Result of one acceptance verification (SPEC §5).
+
+    Since v0.3.0 (batch B) the result also carries the **evidence** of the
+    verification: the digest and the size of the file that was actually
+    read.  The ledger records them, so a receipt proves *which* file was
+    accepted and not only that some file matched.
+    """
 
     ok: bool
     path: str | None = None
     checks: list[dict] = field(default_factory=list)
     reason: str | None = None
+    sha256: str | None = None
+    size_bytes: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +47,8 @@ class AcceptanceResult:
             "path": self.path,
             "checks": list(self.checks),
             "reason": self.reason,
+            "sha256": self.sha256,
+            "size_bytes": self.size_bytes,
         }
 
 
@@ -54,10 +64,36 @@ def _as_int(value: str) -> int | None:
         return None
 
 
+def resolve_target(
+    raw_path: str,
+    base_dir: str | os.PathLike[str] | None = None,
+    attempt_dir: str | os.PathLike[str] | None = None,
+) -> Path:
+    """Resolve the artefact path of an acceptance string.
+
+    A relative path is looked up **first** inside the attempt directory
+    (``<workdir>/attempts/<attempt_id>``) and only then in the base
+    directory.  That is what makes the acceptance accept *this* attempt's
+    artefact and not the one a previous attempt left behind.  A template or
+    a card that predates the attempt directories keeps working: the base
+    directory is the fallback and nothing else changes.
+    """
+    target = Path(raw_path).expanduser()
+    if target.is_absolute():
+        return target
+    if attempt_dir:
+        candidate = Path(attempt_dir).expanduser() / target
+        if candidate.exists():
+            return candidate
+    base = Path(base_dir).expanduser() if base_dir else Path.cwd()
+    return base / target
+
+
 def verify(
     acceptance: str | None,
     exit_code: int | None = None,
     base_dir: str | os.PathLike[str] | None = None,
+    attempt_dir: str | os.PathLike[str] | None = None,
 ) -> AcceptanceResult:
     """Verify an artefact against an acceptance string."""
     if acceptance is None or not str(acceptance).strip():
@@ -72,10 +108,7 @@ def verify(
             reason="acceptance_invalid",
         )
 
-    target = Path(raw_path).expanduser()
-    if not target.is_absolute():
-        base = Path(base_dir).expanduser() if base_dir else Path.cwd()
-        target = base / target
+    target = resolve_target(raw_path, base_dir=base_dir, attempt_dir=attempt_dir)
 
     checks: list[dict] = []
     if not target.exists():
@@ -100,6 +133,8 @@ def verify(
             reason="artifact_unreadable",
         )
     text = data.decode("utf-8", errors="replace")
+    digest = hashlib.sha256(data).hexdigest()
+    size = len(data)
 
     ok = True
     reason: str | None = None
@@ -111,7 +146,7 @@ def verify(
             passed = wanted is not None and actual >= wanted
             record_expected = wanted
         elif key == "sha256":
-            actual = hashlib.sha256(data).hexdigest()
+            actual = digest
             passed = actual.lower() == str(expected).strip().lower()
             record_expected = str(expected).strip().lower()
         elif key == "contains":
@@ -137,4 +172,11 @@ def verify(
             ok = False
             reason = reason or "acceptance_criterion_failed"
 
-    return AcceptanceResult(ok=ok, path=str(target), checks=checks, reason=reason)
+    return AcceptanceResult(
+        ok=ok,
+        path=str(target),
+        checks=checks,
+        reason=reason,
+        sha256=digest,
+        size_bytes=size,
+    )

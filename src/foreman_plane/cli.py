@@ -17,6 +17,7 @@ from typing import Any
 from .acceptance import verify
 from .config import describe, load_config, resolve_default_agent
 from .errors import UnknownTaskError
+from .ledger import parse_timestamp
 from .runner import Dispatcher
 
 __all__ = ["main", "build_parser"]
@@ -71,6 +72,40 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="ledger status summary")
     status.add_argument("--task-id", help="restrict to one task")
     _add_json(status)
+
+    heartbeat = sub.add_parser("heartbeat", help="refresh the lease of a running task")
+    heartbeat.add_argument("task_id")
+    _add_json(heartbeat)
+
+    checkpoint = sub.add_parser("checkpoint", help="record a finished step of a task")
+    checkpoint.add_argument("task_id")
+    checkpoint.add_argument("--step", required=True, help="name of the finished step")
+    checkpoint.add_argument("--artifact", default=None, help="artefact the step produced")
+    _add_json(checkpoint)
+
+    attempts = sub.add_parser("attempts", help="list the attempts of a task")
+    attempts.add_argument("task_id")
+    _add_json(attempts)
+
+    retry = sub.add_parser("retry", help="run a task again — an explicit new attempt")
+    retry.add_argument("task_id")
+    retry.add_argument("--card", default=None, help="path to the task card")
+    retry.add_argument("--agent", help="execution body name")
+    retry.add_argument("--workdir", help="working directory")
+    retry.add_argument("--reason", default="", help="why the task is retried")
+    retry.add_argument(
+        "--force",
+        action="store_true",
+        help="retry even while the current attempt still holds a lease",
+    )
+    retry.add_argument("--dry-run", action="store_true", help="report only, run nothing")
+    _add_json(retry)
+
+    reclaim = sub.add_parser("reclaim", help="mark tasks with an expired lease as stale")
+    reclaim.add_argument("--task-id", default=None, help="restrict to one task")
+    reclaim.add_argument("--dry-run", action="store_true", help="report only, write nothing")
+    reclaim.add_argument("--now", default=None, help="evaluate the leases at this ISO8601 time")
+    _add_json(reclaim)
 
     ledger = sub.add_parser("ledger", help="ledger operations")
     ledger_sub = ledger.add_subparsers(dest="ledger_command")
@@ -131,6 +166,7 @@ def _cmd_dispatch(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
         agent=args.agent,
         workdir=args.workdir,
         force=bool(args.force),
+        card_path=args.file,
     )
     if payload.get("blocked"):
         _emit(payload, args.json, _dispatch_text(payload))
@@ -177,9 +213,134 @@ def _cmd_status(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
             else:
                 for key in ("task_id", "status", "verdict", "acceptance_ok", "exit_code", "last_ts"):
                     print(f"{key}: {state.get(key)}")
+                print(f"attempt_id: {state.get('attempt_id')}")
+                print(f"attempt_state: {state.get('attempt_state')}")
+                print(f"late_receipts: {state.get('late_receipts')}")
+                print(f"lease_expires_at: {state.get('lease_expires_at')}")
+                print(f"lease_remaining_s: {state.get('lease_remaining_s')}")
+                print(f"age_s: {state.get('age_s')}")
+                print(f"completed_steps_count: {state.get('completed_steps_count')}")
+                print(f"recoveries: {state.get('recoveries')}")
+                print(f"retries: {state.get('retries')}")
         else:
             for name, count in sorted((payload.get("counts") or {}).items()):
                 print(f"{name}: {count}")
+            open_tasks = [
+                state
+                for state in (payload.get("tasks") or {}).values()
+                if state.get("status") not in ("done", "cancelled")
+            ]
+            if open_tasks:
+                print("--- non-terminal ---")
+                for state in sorted(open_tasks, key=lambda item: str(item.get("task_id"))):
+                    print(
+                        f"{state.get('task_id')}\t{state.get('status')}\t"
+                        f"lease_left={state.get('lease_remaining_s')}s\t"
+                        f"age={state.get('age_s')}s\t"
+                        f"steps={state.get('completed_steps_count')}\t"
+                        f"recoveries={state.get('recoveries')}"
+                    )
+    return EXIT_OK
+
+
+def _cmd_heartbeat(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
+    try:
+        payload = dispatcher.heartbeat(args.task_id)
+    except UnknownTaskError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_ERROR
+    _emit(
+        payload,
+        args.json,
+        f"heartbeat: {args.task_id} lease_expires_at={payload.get('lease_expires_at')}",
+    )
+    return EXIT_OK if payload.get("ok") else EXIT_ERROR
+
+
+def _cmd_checkpoint(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
+    try:
+        payload = dispatcher.checkpoint(args.task_id, args.step, args.artifact)
+    except UnknownTaskError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_ERROR
+    _emit(payload, args.json, f"checkpoint: {args.task_id} {args.step}")
+    return EXIT_OK if payload.get("ok") else EXIT_ERROR
+
+
+def _cmd_attempts(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
+    try:
+        payload = dispatcher.attempts(args.task_id)
+    except UnknownTaskError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_ERROR
+    if args.json:
+        _emit(payload, True)
+    else:
+        print(f"task_id: {payload.get('task_id')}")
+        print(f"attempt_state: {payload.get('attempt_state')}")
+        print(f"current_attempt_id: {payload.get('current_attempt_id')}")
+        print(f"late_receipts: {payload.get('late_receipts')}")
+        for attempt in payload.get("attempts") or []:
+            print(
+                f"  {attempt.get('attempt_id') or '(legacy)'} "
+                f"epoch={attempt.get('epoch')} status={attempt.get('status')} "
+                f"verdict={attempt.get('verdict')} "
+                f"artifact={attempt.get('acceptance_path')}"
+            )
+    return EXIT_OK
+
+
+def _cmd_retry(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
+    try:
+        payload = dispatcher.retry(
+            args.task_id,
+            card_path=getattr(args, "card", None),
+            agent=getattr(args, "agent", None),
+            workdir=getattr(args, "workdir", None),
+            reason=getattr(args, "reason", "") or "",
+            force=bool(getattr(args, "force", False)),
+            dry_run=bool(getattr(args, "dry_run", False)),
+        )
+    except UnknownTaskError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_ERROR
+    if payload.get("dry_run"):
+        _emit(payload, args.json, f"retry {args.task_id}: {payload.get('attempt_id')} (dry run)")
+        return EXIT_OK
+    if payload.get("blocked"):
+        _emit(payload, args.json, f"retry {args.task_id}: refused — {payload.get('reason')}")
+        return EXIT_BLOCKED
+    if payload.get("acceptance_ok") is False:
+        _emit(payload, args.json, _dispatch_text(payload))
+        return EXIT_ACCEPTANCE
+    if not payload.get("ok"):
+        _emit(payload, args.json, _dispatch_text(payload))
+        return EXIT_ERROR
+    _emit(payload, args.json, _dispatch_text(payload))
+    return EXIT_OK
+
+
+def _cmd_reclaim(args: argparse.Namespace, dispatcher: Dispatcher) -> int:
+    moment = None
+    if getattr(args, "now", None):
+        moment = parse_timestamp(args.now)
+        if moment is None:
+            print(f"cannot parse --now: {args.now}", file=sys.stderr)
+            return EXIT_ERROR
+    try:
+        payload = dispatcher.reclaim(
+            task_id=getattr(args, "task_id", None),
+            dry_run=bool(getattr(args, "dry_run", False)),
+            now=moment,
+        )
+    except UnknownTaskError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_ERROR
+    marked = payload.get("marked") or []
+    text = "\n".join(f"{item['task_id']}\tstale" for item in marked)
+    if not text:
+        text = "nothing to reclaim"
+    _emit(payload, args.json, text)
     return EXIT_OK
 
 
@@ -294,6 +455,16 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_dispatch(args, dispatcher)
     if command == "status":
         return _cmd_status(args, dispatcher)
+    if command == "heartbeat":
+        return _cmd_heartbeat(args, dispatcher)
+    if command == "checkpoint":
+        return _cmd_checkpoint(args, dispatcher)
+    if command == "attempts":
+        return _cmd_attempts(args, dispatcher)
+    if command == "retry":
+        return _cmd_retry(args, dispatcher)
+    if command == "reclaim":
+        return _cmd_reclaim(args, dispatcher)
     if command == "ledger":
         return _cmd_ledger(args, dispatcher)
     if command == "verify":

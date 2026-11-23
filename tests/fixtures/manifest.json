@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "reference_time": "2026-11-24T00:00:00+00:00",
+  "fixtures": {
+    "card": "task_card_basic.json",
+    "ledger_attempt": "ledger_attempt.jsonl",
+    "ledger_legacy": "ledger_legacy.jsonl",
+    "ledger_corrupt": "ledger_corrupt.jsonl",
+    "acceptance": "acceptance_sheet.json",
+    "artifact": "report.json"
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "expectations": {
+    "acceptance": [
+      {
+        "name": "min_bytes_ok",
+        "ok": true,
+        "reason": null,
+        "sha256": "040a793f47ad6c912bccbc5ac72c3477ebfe35ea34eff98df752ca721baedd1a",
+        "size_bytes": 65
+      },
+      {
+        "name": "contains_ok",
+        "ok": true,
+        "reason": null,
+        "sha256": "040a793f47ad6c912bccbc5ac72c3477ebfe35ea34eff98df752ca721baedd1a",
+        "size_bytes": 65
+      },
+      {
+        "name": "sha256_ok",
+        "ok": true,
+        "reason": null,
+        "sha256": "040a793f47ad6c912bccbc5ac72c3477ebfe35ea34eff98df752ca721baedd1a",
+        "size_bytes": 65
+      },
+      {
+        "name": "missing_artifact",
+        "ok": false,
+        "reason": "artifact_missing",
+        "sha256": null,
+        "size_bytes": null
+      },
+      {
+        "name": "criterion_failed",
+        "ok": false,
+        "reason": "acceptance_criterion_failed",
+        "sha256": "040a793f47ad6c912bccbc5ac72c3477ebfe35ea34eff98df752ca721baedd1a",
+        "size_bytes": 65
+      },
+      {
+        "name": "unknown_criterion",
+        "ok": false,
+        "reason": "acceptance_unknown_criterion",
+        "sha256": "040a793f47ad6c912bccbc5ac72c3477ebfe35ea34eff98df752ca721baedd1a",
+        "size_bytes": 65
+      }
+    ],
+    "card": {
+      "acceptance_criteria": [
+        "min_bytes=10",
+        "contains=done"
+      ],
+      "acceptance_path": "report.json",
+      "acceptance_unparsed": false,
+      "depends_on": [
+        "T-20261123-40"
+      ],
+      "depends_on_unparsed": false,
+      "needs_api": [
+        "data/input.txt"
+      ],
+      "needs_api_unparsed": false,
+      "task_id": "T-20261123-41"
+    },
+    "ledgers": {
+      "ledger_attempt": {
+        "ignored_lines": 0,
+        "tasks": {
+          "T-20261123-41": {
+            "attempt_id": "T-20261123-41-a02",
+            "attempt_state": "finished",
+            "completed_steps": [
+              "step_a"
+            ],
+            "epoch": 2,
+            "late_receipts": 0,
+            "status": "done"
+          },
+          "T-20261123-42": {
+            "attempt_id": "T-20261123-42-a01",
+            "attempt_state": "still_running",
+            "completed_steps": [],
+            "epoch": 1,
+            "late_receipts": 0,
+            "status": "running"
+          },
+          "T-20261123-43": {
+            "attempt_id": "T-20261123-43-a01",
+            "attempt_state": "interrupted",
+            "completed_steps": [],
+            "epoch": 1,
+            "late_receipts": 0,
+            "status": "running"
+          },
+          "T-20261123-44": {
+            "attempt_id": "T-20261123-44-a01",
+            "attempt_state": "outcome_unknown",
+            "completed_steps": [],
+            "epoch": 1,
+            "late_receipts": 1,
+            "status": "cancelled"
+          }
+        },
+        "usable_lines": 20
+      },
+      "ledger_corrupt": {
+        "ignored_lines": 2,
+        "tasks": {
+          "T-20261123-52": {
+            "attempt_id": null,
+            "attempt_state": "finished",
+            "completed_steps": [],
+            "epoch": null,
+            "late_receipts": 0,
+            "status": "done"
+          }
+        },
+        "usable_lines": 3
+      },
+      "ledger_legacy": {
+        "ignored_lines": 0,
+        "tasks": {
+          "T-20261123-50": {
+            "attempt_id": null,
+            "attempt_state": "finished",
+            "completed_steps": [],
+            "epoch": null,
+            "late_receipts": 0,
+            "status": "done"
+          },
+          "T-20261123-51": {
+            "attempt_id": null,
+            "attempt_state": "outcome_unknown",
+            "completed_steps": [],
+            "epoch": null,
+            "late_receipts": 0,
+            "status": "running"
+          }
+        },
+        "usable_lines": 5
+      }
+    }
+  },
+  "fixtures": {
+    "acceptance": "acceptance_sheet.json",
+    "artifact": "report.json",
+    "card": "task_card_basic.json",
+    "ledger_attempt": "ledger_attempt.jsonl",
+    "ledger_corrupt": "ledger_corrupt.jsonl",
+    "ledger_legacy": "ledger_legacy.jsonl"
+  },
+  "reference_time": "2026-11-24T00:00:00+00:00",
+  "version": "1.0"
+}

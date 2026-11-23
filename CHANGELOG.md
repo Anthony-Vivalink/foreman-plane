@@ -4,6 +4,92 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.0 (2026-11-23) — Failure & Recovery
+
+### Added
+
+- **A lease, a heartbeat and a reclaim.**  A successful dispatch now takes a
+  lease (`lease_expires_at`, `lease_s`, 900 seconds by default) and the ledger
+  records it.  `foreman-plane heartbeat <task_id>` renews it,
+  `foreman-plane reclaim [--dry-run] [--now ISO8601]` marks every task whose
+  lease expired while it was still running as `stale`.  A stale task can be
+  dispatched again — before, a worker killed with `kill -9` left the ledger on
+  `running` and every re-dispatch was refused as `duplicate_task`, so the task
+  was stuck forever.
+- **Step checkpoints.**  `foreman-plane checkpoint <task_id> --step NAME
+  [--artifact PATH]` records that one step is done.  A re-dispatch hands the
+  collected step names to the execution body through the new optional
+  `{completed_steps}` placeholder (`["a","b"]`, `[]` when there is none), so
+  the finished work is not executed twice.  The receipt reports
+  `completed_steps`, `skipped_steps` and `resumed`.
+- **Backoff retry.**  Optional per execution body:
+  `"retry": {"max_attempts": 3, "base_delay_s": 5, "retry_on_exit_codes": [124]}`.
+  Every attempt is recorded as a `retry` event; a retry never writes a second
+  `dispatch` event, so the task stays idempotent.
+- **Observability.**  `foreman-plane status` shows, per task,
+  `lease_expires_at`, `lease_remaining_s`, `age_s`, `completed_steps`,
+  `completed_steps_count`, `recoveries` and `retries`.
+- **A failure drill that really fails.**  `scripts/failure_drill.sh` prepares
+  a fake three-step worker, kills it with `kill -9` half way through, shows
+  the refused re-dispatch, lets the lease expire, reclaims the task,
+  dispatches it again and checks that the finished step did not run twice.
+  The output of a real run is in `docs/failure_drill_sample_output.txt`.
+- **Attempts — the unit of work.**  Every dispatch allocates an attempt
+  (`attempt_id`, `epoch`) and its own artefact directory
+  (`<workdir>/attempts/<attempt_id>/`), so the artefacts of two attempts
+  of the same task never mix.  `foreman-plane attempts <task_id>` lists
+  them and reports the derived `attempt_state`: `still_running`,
+  `interrupted`, `outcome_unknown`, `finished` or `not_started`.
+  `foreman-plane retry <task_id>` runs the task again as an explicit new
+  attempt.  The semantics are **at-least-once with an idempotency key
+  `(task_id, attempt_id)` — never exactly-once**.
+- **The acceptance accepts the current attempt only.**  A relative
+  artefact path is looked up inside the attempt directory first; the
+  receipt records the path, the sha256 and the checks that were really
+  read.  A receipt that arrives after a cancel (or after a newer attempt
+  took over) is written to the ledger but never counted as the success
+  of the current attempt.
+- **Contract fixtures instead of prose.**  `tests/fixtures/` holds eight
+  sanitised fixtures (task card, ledger with attempts, legacy ledger,
+  corrupt ledger, acceptance sheet, artefact, contract, manifest), and
+  the public implementation and the local shell implementation run the
+  same contract check (`scripts/contract_fixture_check.sh`).  The suite
+  adds the crash-recovery and JSONL-reading regressions (half a line,
+  non-JSON, unknown event kind, truncated file, missing file).
+- **A second drill — `scripts/artifact_gate_drill.sh`.**  The worker writes
+  an artefact and is killed with `kill -9` before it can write `done`,
+  the dependent task is refused, the lease expires, the task is reclaimed
+  and explicitly retried as a second attempt — and only the artefact of
+  that second attempt is accepted; the decoy left by the first one is
+  ignored.  The real output is in
+  `docs/artifact_gate_drill_sample_output.txt`.
+
+### Changed
+
+- **Run logs never overwrite each other.**  A run log is named
+  `{task_id}-{YYYYmmdd-HHMMSS}.log`; two runs of the same task inside the
+  same second get a numeric suffix (`-2`, `-3`, ...) instead of overwriting
+  each other, and the file is created exclusively so no log is ever lost.
+- **The duplicate check follows the state, not the history.**  `blocked` and
+  `stale` tasks are re-dispatchable, a `running` task with a live lease is
+  not, and a `running` task whose lease expired is (the worker is presumed
+  dead).  A task that is dispatched again after its lease expired gets a
+  `stale` event first, so the ledger says why it ran twice.
+- Five new ledger event kinds: `heartbeat`, `stale`, `checkpoint`, `retry`, `attempt`.
+
+### Unchanged on purpose
+
+- **The contracts did not move.**  The ledger record format, the task card
+  markers, the MCP tool names (`foreman_dispatch` / `foreman_status` /
+  `foreman_cancel`), the `FOREMAN_HOME` layout and the four acceptance
+  criterion keys are exactly the same as in 0.2.1.  Everything that was added
+  is an **optional** marker (`{completed_steps}`, `lease_s`, `retry`) or a
+  **new event kind** — a reader that does not know the new kinds ignores them.
+- **Retry is off by default.**  Without a `retry` block the plane runs the
+  execution body exactly once, like 0.2.x.
+- **The MCP surface did not grow.**  The three tools keep their names and
+  their payloads; the new capabilities are CLI commands and ledger events.
+
 ## 0.2.1
 
 ### Changed

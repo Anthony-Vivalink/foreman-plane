@@ -1,3 +1,77 @@
+## foreman-plane v0.3.0 — Failure & Recovery
+
+Failure & recovery. **The contracts did not move** — the ledger record
+format, the task card markers, the MCP tool names, the `FOREMAN_HOME`
+layout and the four acceptance criterion keys are exactly the same as in
+v0.2.1. Everything that was added is an *optional* marker or a *new event
+kind*, so a reader that does not know the new kinds ignores them.
+
+### What changed since v0.2.1
+
+**A worker that dies no longer strands the task**
+
+Before, a worker killed with `kill -9` left the ledger on `running`, and
+every re-dispatch was refused as `duplicate_task` — the task was stuck
+forever and the only way out was to force the whole card to run again,
+repeating the steps that had already succeeded.
+
+Now a dispatch takes a **lease** (900 seconds by default). The execution
+body can renew it with `foreman-plane heartbeat <task_id>`; when the lease
+expires, `foreman-plane reclaim [--dry-run] [--now ISO8601]` marks the task
+`stale` and it becomes re-dispatchable. The ledger says why it ran twice.
+
+**Finished steps are not repeated**
+
+`foreman-plane checkpoint <task_id> --step NAME [--artifact PATH]` records
+that one step is done. A re-dispatch hands the collected step names to the
+execution body through the new optional `{completed_steps}` placeholder
+(`["a","b"]`, `[]` when there is none) — a template that does not mention
+the placeholder behaves exactly as in 0.2.x.
+
+**An attempt is the unit of work**
+
+Every dispatch allocates an attempt (`attempt_id`, `epoch`) and its own
+artefact directory, so the artefacts of two attempts of the same task never
+mix. `foreman-plane attempts <task_id>` reports the derived
+`attempt_state`; `foreman-plane retry <task_id>` runs the task again as an
+explicit new attempt. The semantics are **at-least-once with an idempotency
+key `(task_id, attempt_id)` — never exactly-once**, and the documentation
+says so.
+
+**The acceptance accepts the current attempt only**
+
+A relative artefact path is resolved inside the attempt directory first.
+The receipt records the path, the sha256 and the checks that were really
+read. A receipt that arrives after a cancel — or after a newer attempt took
+over — is written to the ledger but never counted as the success of the
+current attempt.
+
+**Two drills that really fail**
+
+`scripts/failure_drill.sh` kills a three-step worker with `kill -9` half way
+through, shows the refused re-dispatch, lets the lease expire, reclaims the
+task, dispatches it again and checks that the finished step did not run
+twice. `scripts/artifact_gate_drill.sh` does the harder version: the
+worker writes an artefact and dies before it can write `done`, the
+dependent task is refused, the task is reclaimed and retried as a second
+attempt, and only *that* attempt's artefact is accepted — the decoy left by
+the first one is ignored. The real outputs are in `docs/`.
+
+### Unchanged on purpose
+
+- **MCP tool names stay `foreman_dispatch`, `foreman_status` and
+  `foreman_cancel`.** The new capabilities are CLI commands and ledger
+  events; the MCP surface did not grow.
+- **Retry is off by default.** Without a `retry` block the plane runs the
+  execution body exactly once, like 0.2.x.
+- **`FOREMAN_HOME` and its default `$HOME/.foreman` are unchanged.**
+
+### Install
+
+```bash
+pip install -U foreman-plane
+```
+
 ## foreman-plane v0.2.1
 
 A documentation-and-hygiene release. **Nothing about how the plane behaves

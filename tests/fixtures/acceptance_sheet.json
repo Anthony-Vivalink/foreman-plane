@@ -1,0 +1,41 @@
+{
+  "artifact": "report.json",
+  "cases": [
+    {
+      "name": "min_bytes_ok",
+      "acceptance": "report.json::min_bytes=10",
+      "expect_ok": true,
+      "expect_reason": null
+    },
+    {
+      "name": "contains_ok",
+      "acceptance": "report.json::contains=done",
+      "expect_ok": true,
+      "expect_reason": null
+    },
+    {
+      "name": "sha256_ok",
+      "acceptance": "report.json::sha256=040a793f47ad6c912bccbc5ac72c3477ebfe35ea34eff98df752ca721baedd1a",
+      "expect_ok": true,
+      "expect_reason": null
+    },
+    {
+      "name": "missing_artifact",
+      "acceptance": "absent.json",
+      "expect_ok": false,
+      "expect_reason": "artifact_missing"
+    },
+    {
+      "name": "criterion_failed",
+      "acceptance": "report.json::contains=absent-marker",
+      "expect_ok": false,
+      "expect_reason": "acceptance_criterion_failed"
+    },
+    {
+      "name": "unknown_criterion",
+      "acceptance": "report.json::colour=red",
+      "expect_ok": false,
+      "expect_reason": "acceptance_unknown_criterion"
+    }
+  ]
+}

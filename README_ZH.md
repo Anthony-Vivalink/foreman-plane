@@ -312,6 +312,7 @@ mcp:
 | --- | --- | --- |
 | `FOREMAN_HOME` | `$HOME/.foreman` | 工头主目录：台账、运行日志、agents.json |
 | `FOREMAN_TIMEOUT` | `900` | 执行超时秒数 |
+| `FOREMAN_LEASE` | `900` | 租约秒数——派出去的任务能占住平面多久 |
 | `FOREMAN_AGENT` | `generic` | 默认执行体 |
 | `FOREMAN_ACTOR` | `foreman` | 台账里记录的 actor |
 
@@ -334,6 +335,8 @@ mcp:
 | 退出码 2，`dependency_unparsed` | `[depends_on]` 标记解析不了 | 改卡——工头拒绝猜 |
 | 退出码 2，`dependency_cycle` | 依赖图成环 | 断环 |
 | 退出码 2，`duplicate_task` | 这个 id 已经有 `dispatch` 事件了 | 换 id、加 `--force`，或 `foreman-plane ledger replan` |
+| 任务卡在 `running` | worker 死了，台账停在最后一条事件 | 租约到期后跑 `foreman-plane reclaim`，再重新派单 |
+| 报 `duplicate_task` 但 worker 早就死了 | 租约过期了还没人回收 | `foreman-plane reclaim`——任务变 `stale`，就能再派了 |
 | 退出码 2，`task_id_missing` | 卡里没有 `[id]` | 补上 |
 | 退出码 3 | 产物缺失、太小或缺标记 | 看 `runs/` 里那次运行的日志 |
 | `exit_code: 127`，`no such agent, or its command template is empty` | `agents.json` 里没这个 agent | 加上这个 agent，或用内置的 |
@@ -519,8 +522,214 @@ OK
 {"ts":"2026-11-09T09:41:02.113456+00:00","event":"dispatch","task_id":"T-20261109-20","actor":"foreman","depends_on":["T-20261109-01"],"needs_api":[],"acceptance":"reports/report.md::min_bytes=200","needs_api_pending":false,"detail":{}}
 ```
 
-事件类型：`dispatch`、`running`、`blocked`、`done`、`cancelled`、`replan`。
+事件类型：`dispatch`、`running`、`blocked`、`done`、`cancelled`、`replan`，
+外加故障恢复那几类：`heartbeat`、`stale`、`checkpoint`、`retry`。
 历史只追加，不改写、不删除。
+
+## 故障恢复
+
+以前 worker 一死，整张卡就跟着死了：台账停在 `running`，再派单被判 `duplicate_task` 拒掉，
+唯一的出路是 `--force`——而 `--force` 会把已经做完的步骤从头再跑一遍。这一章就是修这个：
+租约、回收、步骤 checkpoint，以及一条能真跑的演练。
+
+### 会出什么事
+
+| 故障 | 台账长什么样 | 现在的处理 |
+| --- | --- | --- |
+| worker 被 `kill -9` | 最后一条事件停在 `running` | 租约到期 → `reclaim` 标成 `stale` → 可以再派 |
+| worker 卡死不动 | 最后一条事件停在 `running` | 同上——租约才是活着的凭据，不是进程 |
+| worker 退出码可重试 | `done` 且 `verdict=fail` | 可选的指数退避重试，每次一条 `retry` 事件 |
+
+故障模型就那么大：**一个 worker、一张卡、一个平面**。没有调度器、没有守护进程、没有仲裁——
+见[适用范围](#适用范围)。
+
+### 租约与心跳
+
+派单成功就占一份**租约**：台账里记 `lease_expires_at`（UTC ISO8601）和 `lease_s`
+（租约长度，默认 900 秒）。worker 活着的时候可以自己续：
+
+```bash
+foreman-plane heartbeat T-20261109-20
+```
+
+心跳只写一条 `heartbeat` 事件、把租约往后推，**不改变任务状态**。
+
+租约长度是配置，不是代码：
+
+| 位置 | 怎么写 |
+| --- | --- |
+| 环境变量 | `FOREMAN_LEASE=1800` |
+| `agents.json` | 与 `"agents"` 同级写 `"lease_s": 1800` |
+| 默认 | 900 秒 |
+
+### 陈旧与回收
+
+租约过了不代表任务丢了，它只是**陈旧**了。回收会把过期的任务标成 `stale`，而且只标这些：
+
+```bash
+foreman-plane reclaim --dry-run          # 只报告，不写台账
+foreman-plane reclaim                     # 把过期的标成 stale
+foreman-plane reclaim --task-id T-20261109-20 --now 2026-11-09T12:00:00+00:00
+```
+
+再派单的规则看**当前状态**，不再看历史：
+
+| 任务状态 | 能不能再派 |
+| --- | --- |
+| `blocked` | **能**——它从没进过平面（0.1.0 起的规矩没变） |
+| `stale` | **能**——租约到期了 |
+| `running` / `dispatched`，租约还在 | 拒，`duplicate_task` |
+| `running` / `dispatched`，租约已过 | **能**——默认 worker 已经死了 |
+| `done` / `cancelled` | 拒，`duplicate_task`（要 `--force` 或 `ledger replan`） |
+
+租约到期却没先跑 `reclaim` 就直接再派，台账会先补一条 `stale`，让痕迹说清楚「为什么它跑了第二遍」。
+
+### checkpoint —— 已经做完的活
+
+执行体可以随时记一步做完了：
+
+```bash
+foreman-plane checkpoint T-20261109-20 --step "抓数据" --artifact out/raw.json
+```
+
+步骤名是自由文本，台账只存名字。再派单时，这些步骤名会通过可选的 `{completed_steps}`
+占位符交给执行体：
+
+```json
+{"agents": {"mybot": {"command": "mybot run --task {task} --done {completed_steps}"}}}
+```
+
+`{completed_steps}` 会被替换成已 checkpoint 的步骤名 JSON 数组（`["抓数据"]`；没有就是 `[]`）。
+回执里也会重复一遍，于是「没有重复干活」不用翻台账就能验证：
+
+```json
+{"completed_steps": ["抓数据"], "skipped_steps": ["抓数据"], "resumed": true}
+```
+
+模板里**不写**这个占位符也完全照旧能用——占位符是可选的，`{task}` 依然是必填项。
+
+### 可观测
+
+`foreman-plane status` 对每个没结束的任务都能看出：
+
+```text
+$ foreman-plane status --task-id T-20261109-20
+task_id: T-20261109-20
+status: running
+verdict: None
+acceptance_ok: None
+exit_code: None
+last_ts: 2026-11-09T09:41:03.201114+00:00
+lease_expires_at: 2026-11-09T09:56:02.113456+00:00
+lease_remaining_s: 899.2
+age_s: 42.5
+completed_steps_count: 1
+recoveries: 0
+retries: 0
+```
+
+`--json` 里每个任务也带这些字段，和老字段并存——没有删字段，也没有改语义。
+
+### 退避重试
+
+重试**默认关闭**，0.2.x 的行为一点没变。要开就按执行体单独配：
+
+```json
+{"agents": {"mybot": {
+  "command": "mybot run {task}",
+  "retry": {"max_attempts": 3, "base_delay_s": 5, "retry_on_exit_codes": [124, 75]}
+}}}
+```
+
+`max_attempts` 是**总次数**（含第一次）：`1` 就是不重试，`3` 就是最多跑三次。
+第 n 次重试前的等待是 `base_delay_s * 2 ** (n - 1)`。每次重试写一条 `retry` 事件
+（`attempt`、`delay_s`、`exit_code`、stderr 尾巴）并顺手续一次租约；重试**不会**产生第二条
+`dispatch` 事件，所以任务还是幂等的，依赖图里也只算它一次。
+
+### 演练
+
+整个故事一条命令跑完——不联网、不用真 agent、不碰 `/tmp` 以外的任何地方：
+
+```bash
+scripts/failure_drill.sh
+```
+
+它会造一个假的三步 worker，派一张卡，在第二步用 `kill -9` 把 worker 打死，展示被拒的
+再派单，让租约过期，回收任务，再派一次，并检查做完的那一步**没有**跑第二遍。
+一次真跑的输出在 [`docs/failure_drill_sample_output.txt`](docs/failure_drill_sample_output.txt)。
+
+### attempt —— 工作单元
+
+每次派单都是一个 **attempt**：有 id、有 epoch、有自己的产物目录
+（`<workdir>/attempts/<task_id>-aNN/`）。同一个任务的两次 attempt 不共用目录，
+所以崩掉那次留下的产物，绝不会被当成下一次跑出来的产物。
+
+```bash
+foreman-plane attempts T-20261123-51
+```
+
+```
+task_id: T-20261123-51
+attempt_state: still_running
+current_attempt_id: T-20261123-51-a01
+late_receipts: 0
+  T-20261123-51-a01 epoch=1 status=running verdict=None artifact=None
+```
+
+`attempt_state` 是从台账**推**出来的，不是猜的：`still_running`（租约还活着）、
+`interrupted`（租约过期却没有终态事件）、`outcome_unknown`（来了一没法归属的回执，
+或者这是 0.2.x 老台账、压根没有租约）、`finished`、`not_started`。
+
+**语义是 at-least-once + 幂等键，永远不是 exactly-once。** 平面保证一个 attempt 至少跑一次；
+它不回滚副作用，也不承诺副作用只发生一次。幂等键是 `(task_id, attempt_id)`：同一个 attempt 内
+的重复投递由台账幂等判定挡住；跨 attempt 的重复副作用要**执行体自己**保证幂等（只往
+`FOREMAN_ATTEMPT_DIR` 里写，是最省事的做法）。关于竞态，平面只承诺一件事：**迟到的回执
+永远不会被算成当前 attempt 的成功**。
+
+### 显式重试 与 回收 不是一回事
+
+两个词，两件事：
+
+| | `reclaim`（回收） | `retry`（显式重试） |
+| --- | --- | --- |
+| 做什么 | 把租约过期的任务标成 `stale` | 分配一个**新 attempt**，把执行体再跑一遍 |
+| 会执行吗 | 不会 | 会 |
+| 会验收产物吗 | 不会 | 会 —— 验收**这一次** attempt 的产物 |
+| 什么时候用 | 平面崩了，不知道 worker 死没死 | 你已经确定这活儿得再跑一遍 |
+
+```bash
+foreman-plane reclaim --dry-run     # 只报告
+foreman-plane reclaim               # 真的标 stale
+foreman-plane retry T-20261123-51   # 再跑一次，换一个新 attempt
+```
+
+当前 attempt 还占着有效租约时，`retry` 会拒绝；要硬来就加 `--force`，想先看看会发生什么就
+加 `--dry-run`。它的回执里带 `attempt_id`、`epoch`、`previous_attempt_id` 和
+`retry_mode: explicit`。
+
+### 验收只认本次 attempt 的产物
+
+产物的相对路径**先在 attempt 目录里找**，找不到才回落到 base 目录 —— 所以验收读到的必然是
+**这一次**跑出来的文件，而不是上一次留下的。回执里会记下到底读了什么：`acceptance_path`、
+`acceptance_sha256`、`acceptance_size`、`acceptance_checks`。
+
+如果 worker 还在跑的时候任务被取消了（或者被更新的 attempt 接过），那个迟到的回执**会**写进
+台账，但**不会**被当成当前 attempt 的成功：`superseded` 为 true，`superseded_reason` 是
+`cancelled_during_run` 或 `superseded_by_new_attempt`，折叠时把它记成一次 `late_receipt`。
+
+```bash
+scripts/artifact_gate_drill.sh
+```
+
+整个故事在演练里跑给你看：第一次 attempt 在写 `done` 之前被打死，第二次 attempt 写出自己的
+产物，验收只认第二次，然后依赖它的任务才开跑。真实输出见
+[`docs/artifact_gate_drill_sample_output.txt`](docs/artifact_gate_drill_sample_output.txt)。
+
+### 这一章的边界
+
+它仍然是个人工具级的平面：一个进程、一个文件、一台机器。没有多租户、没有 RBAC、没有高可用、
+没有自动看护——`reclaim` 得你自己跑（挂 cron 也行）。新机制让「worker 死了」可恢复，
+但它没把这个平面变成集群。
 
 ## MCP 工具
 
@@ -536,10 +745,15 @@ OK
 ## 命令行
 
 ```
-foreman-plane dispatch --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
-foreman-plane status   [--task-id ID] [--json]
-foreman-plane ledger   list | show | ready | blocked | cancel | replan
-foreman-plane verify   --acceptance "<验收串>"
+foreman-plane dispatch   --file TASK.md [--agent NAME] [--workdir DIR] [--force] [--json]
+foreman-plane status     [--task-id ID] [--json]
+foreman-plane heartbeat  TASK_ID [--json]
+foreman-plane checkpoint TASK_ID --step NAME [--artifact PATH] [--json]
+foreman-plane reclaim    [--task-id ID] [--dry-run] [--now ISO8601] [--json]
+foreman-plane attempts  TASK_ID [--json]
+foreman-plane retry     TASK_ID [--card PATH] [--reason TEXT] [--force] [--dry-run] [--json]
+foreman-plane ledger     list | show | ready | blocked | cancel | replan
+foreman-plane verify     --acceptance "<验收串>"
 foreman-plane mcp
 foreman-plane config
 ```
