@@ -50,6 +50,44 @@ tool, not an enterprise platform. See
 
 Zero third-party dependencies. Python ≥ 3.10, standard library only.
 
+## How this was built
+
+The implementation in this repository was **written by AI coding agents**. I drove them as
+headless coding sessions — the same class of pluggable execution body the plane dispatches to
+(DeepSeek Harness headless, Claude Code, Codex) — and they produced the code, the tests, the
+diagrams and the release pipeline. The **product specification, the acceptance semantics, the
+boundary decisions and the release decisions are mine**.
+
+The honest way to read this repository: *the mechanism is machine-written, the rules are
+human-set.* Everything the plane trusts — what a task card means, when a task may start, what
+counts as done, what must never change — was decided by hand, and every one of those decisions has
+a file in this repository that proves it.
+
+| Module / area | Written by | Decided by |
+| --- | --- | --- |
+| Contract and marker parsing (`foreman_plane.contract`) | the agent | **the author** — which markers exist, and how tolerant parsing must be |
+| Gates and verdict semantics (`foreman_plane.gate`, `foreman_plane.acceptance`) | the agent | **the author** — what "done" means: only the artefact on disk, never a self-report |
+| Append-only audit ledger (`foreman_plane.ledger`) | the agent | **the author** — events are appended, never rewritten or deleted |
+| CLI and MCP tools (`foreman_plane.cli`, `foreman_plane.mcp_server`) | the agent | **the author** — the three tool names and the stable exit codes |
+| CI and release pipelines (`.github/workflows/`) | the agent | **the author** — semantic versioning, trusted publishing, no secrets in the release job |
+| Documentation and diagrams (`docs/`, `scripts/render_diagrams.py`) | the agent | **the author** — the contract map and the list of what stays unchanged on purpose |
+| Test suite (`tests/`) | the agent | **the author** — which behaviours must not regress |
+| Examples and packaging (`examples/`, `pyproject.toml`) | the agent | **the author** — the packaging layout and the PEP 639 metadata |
+
+*Written by* = who produced the code. *Decided by* = who set the rule.
+
+Three places in this repository let you check that split yourself:
+
+- [DIVERGENCE.md](DIVERGENCE.md) — the shared-contract map between the local control plane and the
+  published package: what is shared, what deliberately differs, and when a local change has to be
+  pushed back into the package.
+- [CHANGELOG.md](CHANGELOG.md) — the **"Unchanged on purpose"** section under `0.2.0` lists the
+  decisions I refused to let a refactor quietly take back.
+- [docs/IMPLEMENTATION_REPORT.md](docs/IMPLEMENTATION_REPORT.md) — the acceptance report for
+  `v0.1.0`, including the file inventory and the contract the agents had to satisfy.
+
+*A promise the agent forgot is not a promise.*
+
 ## Why foreman-plane?
 
 | Capability | What it changes |

@@ -47,6 +47,40 @@ Codex 或者任意命令行 agent 都只是可插拔的「执行体」；真正�
 
 零第三方依赖，Python ≥ 3.10，只用标准库。
 
+## 构建方式（How this was built）
+
+本仓库的实现代码是 **AI 编码代理写的**。我用无头编码会话驱动它们——与工头派单时可插拔的执行体
+同一类（DeepSeek Harness headless、Claude Code、Codex）——代码、测试、图示与发布流水线都由它们
+产出。而 **产品规格、验收语义、边界取舍与发布决策由我负责**。
+
+这个仓库最诚实的读法是：**机制由机器写，规则由人定。** 工头信得过的每一样东西——任务卡是什么
+意思、任务什么时候能开跑、什么算完成、什么永远不能改——都由我拍板，而且每条决策在仓库里都有一份
+文件可以对照。
+
+| 模块 / 领域 | 谁写的 | 谁拍板的 |
+| --- | --- | --- |
+| 契约与 marker 解析（`foreman_plane.contract`） | AI 代理 | **我** —— 有哪几个标记、解析要有多宽容 |
+| 闸门与 verdict 语义（`foreman_plane.gate`、`foreman_plane.acceptance`） | AI 代理 | **我** —— 「完成」的定义：只认磁盘上的产物，不认自述 |
+| 只追加审计台账（`foreman_plane.ledger`） | AI 代理 | **我** —— 事件只追加，不改写、不删除 |
+| CLI 与 MCP 工具（`foreman_plane.cli`、`foreman_plane.mcp_server`） | AI 代理 | **我** —— 三个工具名与稳定的退出码 |
+| CI 与发布流水线（`.github/workflows/`） | AI 代理 | **我** —— 语义化版本、trusted publishing、发布作业不落密钥 |
+| 文档与图示（`docs/`、`scripts/render_diagrams.py`） | AI 代理 | **我** —— 契约地图与「故意不变」的清单 |
+| 测试套件（`tests/`） | AI 代理 | **我** —— 哪些行为不许回退 |
+| 示例与打包（`examples/`、`pyproject.toml`） | AI 代理 | **我** —— 打包结构与 PEP 639 元数据 |
+
+*谁写的* = 代码是谁产出的；*谁拍板的* = 规则是谁定的。
+
+仓库里有三处可以自己核对这条分界：
+
+- [DIVERGENCE.md](DIVERGENCE.md) —— 本地控制面与发布包之间的共享契约地图：哪些共享、哪些故意
+  不同、什么情况下本地改动要回灌进包。
+- [CHANGELOG.md](CHANGELOG.md) —— `0.2.0` 下的 **"Unchanged on purpose"** 一节，列的是我不允许
+  被重构悄悄收回的那些决定。
+- [docs/IMPLEMENTATION_REPORT.md](docs/IMPLEMENTATION_REPORT.md) —— `v0.1.0` 的验收报告，含文件
+  清单与代理必须满足的契约。
+
+> **agent 忘了的承诺不算承诺。**
+
 ## 为什么需要工头
 
 | 能力 | 带来的变化 |
