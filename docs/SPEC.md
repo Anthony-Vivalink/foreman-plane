@@ -308,7 +308,7 @@ class ForemanConfig:
   - 与其它方案的差异（**不要点名任何现有项目**，用能力差异描述）
   - 中文版不是机翻，允许重写但信息必须等价
 - `docs/PROTOCOL.md`：任务卡契约、事件模型、MCP 工具签名、验收判据语法
-- `pyproject.toml`：`name="foreman-plane"`, `version="0.2.0"`, `license="MIT"`, `requires-python=">=3.10"`, `dependencies=[]`,
+- `pyproject.toml`：`name="foreman-plane"`, `version="0.2.1"`, `license="MIT"`, `requires-python=">=3.10"`, `dependencies=[]`,
   `[project.scripts] foreman-plane = "foreman_plane.cli:main"`（别名 `gongtou`）, `[tool.setuptools] package-dir = {"" = "src"}`
 - `scripts/publish.sh`：`set -euo pipefail`；构建 wheel/sdist（`python -m build` 若不可用则退化为 `pip wheel`）；**必须先跑测试再构建**；上传用 `TWINE_USERNAME/TWINE_PASSWORD` 环境变量，脚本里不得出现任何凭据字面量。
 - `CHANGELOG.md`：`## 0.1.0` 首次发布条目。

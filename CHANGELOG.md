@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.1
+
+### Changed
+
+- **The public surface is now job-ready.**  Both READMEs were rewritten
+  around what a reader actually needs in the first five minutes: what the
+  plane is, how a task card is written, what the receipt means, how to read
+  the ledger, and what it deliberately does not do.  A new *How this was
+  built* chapter states plainly which parts of the repository were written by
+  coding agents and which decisions — the task card contract, the meaning of
+  "done", the append-only rule — were made by hand.
+- **No local machine paths are published any more.**  The instance paths that
+  used to appear in `DIVERGENCE.md` and `docs/IMPLEMENTATION_REPORT.md` are
+  now written as placeholders, and the PyPI upload script reads its token
+  file from `$HOME` instead of a fixed location.
+- **Community files were added**: `SECURITY.md`, `CONTRIBUTING.md`, a bug
+  report template and a pull request template.
+
+### Unchanged on purpose
+
+- **No behaviour change.**  The ledger format, the task card contract, the
+  acceptance criterion keys, the MCP tool names and the `FOREMAN_HOME`
+  layout are byte-for-byte the same as in 0.2.0.  This release only touches
+  the published surface, so an existing 0.2.0 install keeps working.
+
 ## 0.2.0
 
 ### Changed

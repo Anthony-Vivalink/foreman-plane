@@ -1,3 +1,34 @@
+## foreman-plane v0.2.1
+
+A documentation-and-hygiene release. **Nothing about how the plane behaves
+changed** — the ledger format, the task card contract, the acceptance
+criteria, the MCP tool names and the state directory layout are exactly as
+they were in v0.2.0.
+
+### What changed since v0.2.0
+
+**The public surface was rewritten for a first-time reader**
+
+- Both READMEs now lead with the contract: what a task card may contain, what
+  the receipt means, what lands in the ledger, and what the plane refuses to
+  do.
+- A new *How this was built* chapter says which modules were written by
+  coding agents and, for each area, which decisions were made by hand — the
+  marker set, the definition of "done" (the artefact on disk, never a
+  self-report), the append-only rule, the stable exit codes, the release
+  rules.
+
+**No local machine paths are published any more**
+
+- The instance paths that used to appear in `DIVERGENCE.md` and
+  `docs/IMPLEMENTATION_REPORT.md` are now placeholders, and the PyPI upload
+  script reads its token file from `$HOME`.
+
+**Community files were added**
+
+- `SECURITY.md`, `CONTRIBUTING.md`, a bug report template and a pull request
+  template.
+
 ## foreman-plane v0.2.0
 
 A task governance plane that runs **outside** your agent harness: dispatch, two-level dependency gates, objective acceptance, an append-only audit ledger. Zero third-party dependencies, standard library only, Python ≥ 3.10.
